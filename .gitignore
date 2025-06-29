@@ -1,0 +1,10 @@
+# ignore cache files
+__pycache__/
+.pytest_cache/
+
+# ignore environment files
+venv/
+.env
+
+# ignore model files
+*.joblib
