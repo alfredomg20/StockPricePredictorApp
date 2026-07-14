@@ -1,0 +1,168 @@
+#metricsCard .card-body {
+  height: auto;
+  min-height: 350px;
+  display: flex;
+  flex-direction: column;
+  padding: 1rem;
+}
+
+#metricsContainer {
+  flex: 1 1 auto;
+  margin-bottom: 1rem;
+}
+
+#metricsContainer .row {
+  margin-left: 0;
+  margin-right: 0;
+}
+
+#metricsContainer .row > div {
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+}
+
+#metricsCard .card-body .mt-3 {
+  flex-shrink: 0;
+  margin-top: auto;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+#predictionCard {
+  height: auto;
+  min-height: 300px;
+}
+
+#predictionChart {
+  height: auto;
+  min-height: 300px;
+  flex: 1;
+}
+
+.table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background-color: #343a40;
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.table tbody td {
+  background-color: #495057;
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.table-striped tbody tr:nth-of-type(odd) td {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.table-hover tbody tr:hover td {
+  background-color: rgba(191, 255, 0, 0.1);
+}
+
+.table-responsive {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.375rem;
+}
+
+.metric-card {
+  border-left: 4px solid #BFFF00;
+  padding: 0.75rem;
+  margin-bottom: 0.5rem;
+  background-color: rgba(255, 255, 255, 0.05);
+  border-radius: 0.375rem;
+}
+
+.metric-value {
+  font-size: 1.25rem;
+  font-weight: bold;
+}
+
+.metric-label {
+  font-size: 0.85rem;
+}
+
+#showPredictionsBtn {
+  background-color: #BFFF00;
+  width: 300px;
+}
+
+.metrics-alert-container {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  width: auto;
+  min-width: 300px;
+  max-width: 80%;
+  text-align: center;
+}
+
+.metrics-alert {
+  transition: opacity 0.5s ease-in-out;
+}
+
+.metrics-alert.fade-out {
+  opacity: 0;
+}
+
+.loading-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: auto;
+  min-height: 200px;
+  width: 100%;
+}
+
+.spinner-border {
+  color: #BFFF00 !important;
+}
+
+.loading-text {
+  margin-top: 1rem;
+  font-size: 1.1rem;
+}
+
+/* Responsive adjustments for small screens */
+@media (max-width: 768px) {
+  #metricsContainer .row > div {
+    flex: 0 0 100%;
+    max-width: 100%;
+  }
+  
+  .metric-card {
+    margin-bottom: 0.25rem;
+    padding: 0.5rem;
+  }
+  
+  .metric-value {
+    font-size: 1.1rem;
+  }
+  
+  .metric-label {
+    font-size: 0.8rem;
+  }
+}
+
+@media (max-width: 576px) {
+  #metricsCard .card-body {
+    padding: 0.75rem;
+  }
+  
+  .metric-card {
+    padding: 0.4rem;
+  }
+  
+  .metric-value {
+    font-size: 1rem;
+  }
+  
+  .metric-label {
+    font-size: 0.75rem;
+  }
+}

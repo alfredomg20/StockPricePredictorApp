@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock Price Predictor</title>
+     <!-- Bootswatch CSS with Lux Theme -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootswatch@4.5.2/dist/lux/bootstrap.min.css" integrity="sha384-9+PGKSqjRdkeAU7Eu4nkJU8RFaH8ace8HGXnkiKMP9I9Te0GJ4/km3L1Z8tXigpG" crossorigin="anonymous">
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="bg-primary text-light h-100">
+    <div class="container-fluid mt-4 px-4 px-lg-5">
+        <h1 class="text-center text-light">Stock Price Predictor</h1>
+        <p class="text-center fs-4 mb-3">Generate predictions by training a linear regression model with lag and moving average features.</p>
+
+        <!-- Prediction Form-->
+        <div class="row justify-content-center">
+            <div class="col-lg-10 col-xl-8">
+                <div class="card bg-dark mb-4 shadow">
+                    <div class="card-header">
+                        <h5 class="text-light">Make a Prediction</h5>
+                    </div>
+                    <div class="card-body">
+                        <form id="predictionForm">
+                            <div class="row">
+                                <div class="col-md-4 mb-3">
+                                    <label for="stockSelect" class="form-label">Stock</label>
+                                    <select class="form-control bg-primary text-light" id="stockSelect" required>
+                                        <option value="" disabled selected>Select a stock</option>
+                                        <!-- Options will be populated by JavaScript -->
+                                    </select>
+                                </div>
+                                <div class="col-md-4 mb-3">
+                                    <label for="daysToPredict" class="form-label">Days to Predict</label>
+                                    <input type="number" class="form-control bg-primary text-light" id="daysToPredict" min="1" max="120" value="5" required>
+                                </div>
+                                <div class="col-md-4 d-flex align-items-end mb-3">
+                                    <button type="submit" class="btn btn-secondary w-100" id="predictBtn">Train Model</button>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Training and Prediction Results Section -->
+        <div class="row">
+            <!-- Model Metrics -->
+            <div class="col-lg-6 mb-4">
+                <div class="card bg-dark d-none shadow" id="metricsCard">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="text-light mb-0"></h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="metricsContainer">
+                            <!-- Metrics will be populated here -->
+                        </div>
+                        <div class="mt-3">
+                            <button class="btn mw-100 text-primary" id="showPredictionsBtn">Predict</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Predictions Container -->
+            <div class="col-lg-6 mb-4">
+                <div class="card bg-dark d-none h-100 shadow" id="predictionCard">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0 text-light"></h5>
+                        <div class="d-flex">
+                            <div class="form-check mr-3">
+                                <input class="form-check-input" type="radio" name="displayOption" id="chartDisplayRadio" value="chart" checked>
+                                <label class="form-check-label" for="chartDisplayRadio">
+                                    Chart
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="displayOption" id="tableDisplayRadio" value="table">
+                                <label class="form-check-label" for="tableDisplayRadio">
+                                    Table
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div id="predictionFigure" class="d-none">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Error Alert -->
+        <div class="row justify-content-center">
+            <div class="col-lg-10 col-xl-8">
+                <div class="alert alert-danger shadow d-none" id="errorAlert" role="alert">
+                    <!-- Error message will be populated here -->
+                </div>
+            </div>
+        </div>    
+
+    </div>
+    <!-- Bootstrap JS Bundle with Popper -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.7/dist/js/bootstrap.bundle.min.js" integrity="sha384-ndDqU0Gzau9qJ1lfW4pNLlhNTkCfHzAVBReH9diLvGRem5+R9g2FzA8ZGN954O5Q" crossorigin="anonymous"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Chart.js Adapter for Date-FNS -->
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <!-- JS application script -->
+    <script type="module" src="js/app.js"></script>
+</body>
+</html>

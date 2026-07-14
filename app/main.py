@@ -1,6 +1,7 @@
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.staticfiles import StaticFiles
 from fastapi_throttle import RateLimiter
 from app.api.models import router as models_router
 from app.api.predict import router as predict_router
@@ -30,9 +31,13 @@ def create_app() -> FastAPI:
     app.add_middleware(GZipMiddleware, minimum_size=1000)
 
     # Add routers
-    app.include_router(models_router)
-    app.include_router(predict_router)
-    app.include_router(train_router)
+    api_prefix = "/api/v1"
+    app.include_router(models_router, prefix=api_prefix)
+    app.include_router(predict_router, prefix=api_prefix)
+    app.include_router(train_router, prefix=api_prefix)
+
+    # Serve frontend files in root path
+    app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")
 
     return app
 
