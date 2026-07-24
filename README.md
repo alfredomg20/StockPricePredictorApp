@@ -1,11 +1,13 @@
-# Stock Price Predictor API
+# Stock Price Predictor App
 
-Modern web API to train, manage, and serve stock price prediction linear regression models. Leveraging the power of machine learning and cloud data, this API enables users to request predictions for future stock prices, trigger model training, and manage trained models—all through a simple and intuitive HTTP interface. Whether you're building trading tools, dashboards, or research applications, this API provides a fast and reliable backend for stock forecasting.
+Modern web application to train, manage, and serve stock price prediction linear regression models. It combines a high-performance backend API with a lightweight interactive frontend demo, allowing users to request predictions, trigger asynchronous model training, and inspect performance metrics visually or directly via HTTP endpoints.
 
 ## Preview
-![API Preview](preview.png)
+![Web UI Preview](docs/images/web_ui_preview.png)
 
 ## Stack
+
+### Backend
 
 - **FastAPI**: High-performance Python web framework for building APIs.
 - **Polars**: Lightning-fast DataFrame library for data manipulation.
@@ -15,15 +17,19 @@ Modern web API to train, manage, and serve stock price prediction linear regress
 - **Cachetools**: In-memory caching for fast repeated access.
 - **pytest**: Comprehensive testing framework.
 
+### Frontend
+- **Vanilla JavaScript**: Lightweight and dependency-free frontend for demo purposes.
+- **Bootstrap & Bootswatch**: Responsive UI components and themes for a polished look.
+- **Chart.js**: Interactive charting library for visualizing stock price predictions and model performance.
+
 ## Features
 
-- **Train Models**: Trigger training of linear regression models for any supported stock ticker and forecast horizon.
-- **Predict Prices**: Instantly get future price predictions for a given stock and forecast window.
-- **Model Management**: List, retrieve, and delete trained models via API endpoints.
-- **Caching**: Smart in-memory caching for predictions and model metadata to boost performance.
-- **Background Tasks**: Asynchronous model training so your API stays responsive.
-- **Validation**: Rigorous input validation and error handling for robust operation.
-- **Cloud Integration**: Seamless data loading from Google BigQuery.
+- **Interactive UI (Demo)**: Minimalist dashboard built with Vanilla JS to evaluate API capabilities visually.
+- **Train Models**: Trigger training of linear regression models (using lag and moving average features) for supported tickers and forecast windows.
+- **Model Metrics**: View evaluation metrics ($MAE$, $R^2$, $MAPE$, sample counts) immediately after model training.
+- **Price Predictions**: Request future price forecasts and toggle between interactive time-series charts (Chart.js) or tabular data.
+- **Caching & Async Tasks**: In-memory caching for model metrics and prediction results alongside background task handling for smooth responsiveness.
+- **Cloud Integration**: Data loading directly from Google BigQuery.
 
 ## Endpoints
 
@@ -48,12 +54,20 @@ Modern web API to train, manage, and serve stock price prediction linear regress
 - `DELETE /models/{ticker}/{forecast_days}/{last_trained_time}`  
   Delete a specific trained model.
 
+## Web UI Overview
+
+The frontend serves as a functional client demo to test the API lifecycle:
+
+- **Select & Train**: Pick a ticker symbol, set the prediction window (days), and click Train Model.
+- **Review Performance**: Check accuracy metrics ($MAE$, $R^2$, sample counts) generated for the trained instance.
+- **Visualize Forecasts**: Click Predict to view output data rendered dynamically as an interactive chart or a structured data table.
+
 ## How to Install and Run
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/StockPricePredictorAPI.git
-   cd StockPricePredictorAPI
+   git clone https://github.com/alfredomg20/StockPricePredictorApp.git
+   cd StockPricePredictorApp
    ```
 
 2. **Set up environment variables**  
@@ -64,10 +78,11 @@ Modern web API to train, manage, and serve stock price prediction linear regress
    pip install -r requirements.txt
    ```
 
-4. **Run the API**
+4. **Start the server**
    ```bash
    uvicorn app.main:app --host 0.0.0.0 --port 8000
    ```
 
-5. **Access the documentation**  
-   Visit [http://localhost:8000/docs](http://localhost:8000/docs) for the interactive Swagger UI.
+5. **Access the application**
+   - Web UI: Open [http://localhost:8000](http://localhost:8000) in your browser.
+   - API Documentation: Open [http://localhost:8000/docs](http://localhost:8000/docs) for the interactive Swagger UI.
