@@ -9,7 +9,7 @@ from app.schemas.models import (
     TickerPath,
     LastTrainedTimePath
 )
-from app.config import logger
+from app.config import logger, MODELS_DIR
 
 router = APIRouter(prefix="/models", tags=["models"])
 
@@ -22,7 +22,7 @@ def invalidate_models_cache():
 
 # Dependency to get model store instance
 def get_model_store():
-    return ModelStore()
+    return ModelStore(MODELS_DIR)
 
 @router.get("/", response_model=ModelsListResponse)
 async def get_all_models(

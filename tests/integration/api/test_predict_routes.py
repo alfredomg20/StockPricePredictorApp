@@ -38,7 +38,7 @@ class TestPredictionRoutes:
         
         # Make request
         response = client.post(
-            "/predict/",
+            "/api/v1/predict/",
             json={"ticker": "AAPL", "forecast_days": 7}
         )
         
@@ -67,7 +67,7 @@ class TestPredictionRoutes:
         
         # Make request
         response = client.post(
-            "/predict/",
+            "/api/v1/predict/",
             json={"ticker": "UNKNOWN", "forecast_days": 7}
         )
         
@@ -85,7 +85,7 @@ class TestPredictionRoutes:
         
         # Make request
         response = client.post(
-            "/predict/",
+            "/api/v1/predict/",
             json={"ticker": "INVALID", "forecast_days": 7}
         )
         
@@ -103,7 +103,7 @@ class TestPredictionRoutes:
         
         # Make request
         response = client.post(
-            "/predict/",
+            "/api/v1/predict/",
             json={"ticker": "AAPL", "forecast_days": 7}
         )
         
@@ -117,28 +117,28 @@ class TestPredictionRoutes:
         """Test validation errors in request body"""
         # Test with missing ticker
         response = client.post(
-            "/predict/",
+            "/api/v1/predict/",
             json={"forecast_days": 7}
         )
         assert response.status_code == 422
         
         # Test with invalid forecast days (too high)
         response = client.post(
-            "/predict/",
+            "/api/v1/predict/",
             json={"ticker": "AAPL", "forecast_days": 366}
         )
         assert response.status_code == 422
         
         # Test with invalid forecast days (negative)
         response = client.post(
-            "/predict/",
+            "/api/v1/predict/",
             json={"ticker": "AAPL", "forecast_days": -1}
         )
         assert response.status_code == 422
         
         # Test with too long ticker
         response = client.post(
-            "/predict/",
+            "/api/v1/predict/",
             json={"ticker": "TOOLONGTICKERCODE", "forecast_days": 7}
         )
         assert response.status_code == 422
@@ -155,7 +155,7 @@ class TestPredictionRoutes:
         
         # Make request
         response = client.post(
-            "/predict/",
+            "/api/v1/predict/",
             json={"ticker": "AAPL", "forecast_days": 7}
         )
         
@@ -176,7 +176,7 @@ class TestPredictionRoutes:
         
         # Make request
         response = client.post(
-            "/predict/",
+            "/api/v1/predict/",
             json={"ticker": "AAPL", "forecast_days": 7}
         )
         

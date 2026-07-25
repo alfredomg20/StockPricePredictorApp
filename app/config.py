@@ -2,6 +2,7 @@ import logging
 import os
 import pytz
 from dotenv import load_dotenv
+from pathlib import Path
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -9,6 +10,11 @@ logger = logging.getLogger('app')
 
 # Set timezone to New York Time for aligment with stock market hours
 timezone = pytz.timezone('America/New_York')
+
+# Set up global paths
+BASE_DIR = Path(__file__).parent.parent # Get the base directory of the project
+MODELS_DIR = BASE_DIR / "app" / "models"
+FRONTEND_DIR = BASE_DIR / "frontend"
 
 # Load environment variables from .env file
 load_dotenv()

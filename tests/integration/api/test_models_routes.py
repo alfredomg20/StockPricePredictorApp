@@ -70,7 +70,7 @@ class TestModelRoutes:
         mock_get_all_models.return_value = MOCK_MODEL_LIST
         
         # Make request
-        response = client.get("/models/")
+        response = client.get("/api/v1/models/")
         
         # Verify response
         assert response.status_code == 200
@@ -89,7 +89,7 @@ class TestModelRoutes:
         mock_get_all_models.side_effect = Exception("Database error")
         
         # Make request
-        response = client.get("/models/")
+        response = client.get("/api/v1/models/")
         
         # Verify response
         assert response.status_code == 500
@@ -104,7 +104,7 @@ class TestModelRoutes:
         mock_get_model.return_value = MOCK_MODEL_INFO
         
         # Make request
-        response = client.get("/models/AAPL/7/2023-01-01-12:00:00")
+        response = client.get("/api/v1/models/AAPL/7/2023-01-01-12:00:00")
         
         # Verify response
         assert response.status_code == 200
@@ -129,7 +129,7 @@ class TestModelRoutes:
         mock_get_model.side_effect = FileNotFoundError("Model not found")
         
         # Make request
-        response = client.get("/models/UNKNOWN/7/2023-01-01-12:00:00")
+        response = client.get("/api/v1/models/UNKNOWN/7/2023-01-01-12:00:00")
         
         # Verify response
         assert response.status_code == 404
@@ -144,7 +144,7 @@ class TestModelRoutes:
         mock_get_model.side_effect = ValueError("Invalid ticker")
         
         # Make request
-        response = client.get("/models/AAPL/7/2023-01-01-12:00:00")
+        response = client.get("/api/v1/models/AAPL/7/2023-01-01-12:00:00")
         
         # Verify response
         assert response.status_code == 400
@@ -159,7 +159,7 @@ class TestModelRoutes:
         mock_get_model.side_effect = Exception("Database connection error")
         
         # Make request
-        response = client.get("/models/AAPL/7/2023-01-01-12:00:00")
+        response = client.get("api/v1/models/AAPL/7/2023-01-01-12:00:00")
         
         # Verify response
         assert response.status_code == 500
@@ -177,7 +177,7 @@ class TestModelRoutes:
         }
         
         # Make request
-        response = client.delete("/models/AAPL/7/2023-01-01-12:00:00")
+        response = client.delete("/api/v1/models/AAPL/7/2023-01-01-12:00:00")
         
         # Verify response
         assert response.status_code == 200
@@ -192,7 +192,7 @@ class TestModelRoutes:
         mock_delete_model.side_effect = FileNotFoundError("Model not found")
         
         # Make request
-        response = client.delete("/models/UNKNOWN/7/2023-01-01-12:00:00")
+        response = client.delete("/api/v1/models/UNKNOWN/7/2023-01-01-12:00:00")
         
         # Verify response
         assert response.status_code == 404
@@ -207,7 +207,7 @@ class TestModelRoutes:
         mock_delete_model.side_effect = ValueError("Invalid forecast days")
         
         # Make request
-        response = client.delete("/models/AAPL/7/2023-01-01-12:00:00")
+        response = client.delete("/api/v1/models/AAPL/7/2023-01-01-12:00:00")
         
         # Verify response
         assert response.status_code == 400
@@ -222,7 +222,7 @@ class TestModelRoutes:
         mock_delete_model.side_effect = Exception("Filesystem error")
         
         # Make request
-        response = client.delete("/models/AAPL/7/2023-01-01-12:00:00")
+        response = client.delete("/api/v1/models/AAPL/7/2023-01-01-12:00:00")
         
         # Verify response
         assert response.status_code == 500
@@ -233,18 +233,18 @@ class TestModelRoutes:
     def test_get_model_invalid_path_params(self):
         """Test validation of path parameters"""
         # Test invalid ticker (too long)
-        response = client.get("/models/AAAAAAAAAAAA/7/2023-01-01-12:00:00")
+        response = client.get("/api/v1/models/AAAAAAAAAAAA/7/2023-01-01-12:00:00")
         assert response.status_code == 400
         
         # Test invalid forecast days (negative)
-        response = client.get("/models/AAPL/-1/2023-01-01-12:00:00")
+        response = client.get("/api/v1/models/AAPL/-1/2023-01-01-12:00:00")
         assert response.status_code == 400
         
         # Test invalid forecast days (too large)
-        response = client.get("/models/AAPL/366/2023-01-01-12:00:00")
+        response = client.get("/api/v1/models/AAPL/366/2023-01-01-12:00:00")
         assert response.status_code == 400
         
         # Test invalid date format
-        response = client.get("/models/AAPL/7/01-01-2023-12:00:00")
+        response = client.get("/api/v1/models/AAPL/7/01-01-2023-12:00:00")
         assert response.status_code == 400
         assert response.status_code == 400

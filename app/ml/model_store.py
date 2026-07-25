@@ -6,7 +6,7 @@ from app.utils.validation_utils import validate_datetime, validate_forecast_days
 
 class ModelStore:
     """Manage storage and retrieval of trained models."""
-    def __init__(self, model_dir: str = "app/models"):
+    def __init__(self, model_dir: Path | str):
         self.model_dir = Path(model_dir)
         self.model_dir.mkdir(parents=True, exist_ok=True)
 

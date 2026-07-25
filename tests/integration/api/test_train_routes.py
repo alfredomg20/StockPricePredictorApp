@@ -66,7 +66,7 @@ class TestTrainingRoutes:
         
         # Make request
         response = client.post(
-            "/train/",
+            "/api/v1/train/",
             json={"ticker": "AAPL", "forecast_days": 7}
         )
         
@@ -94,7 +94,7 @@ class TestTrainingRoutes:
         }
         
         # Make request
-        response = client.get(f"/train/{MOCK_TASK_ID}/status")
+        response = client.get(f"/api/v1/train/{MOCK_TASK_ID}/status")
         
         # Verify response
         assert response.status_code == 200
@@ -109,7 +109,7 @@ class TestTrainingRoutes:
     def test_get_training_status_not_found(self):
         """Test getting status of a non-existent training task"""
         # Make request with a random UUID that shouldn't exist
-        response = client.get(f"/train/{uuid.uuid4()}/status")
+        response = client.get(f"/api/v1/train/{uuid.uuid4()}/status")
         
         # Verify response
         assert response.status_code == 404
@@ -131,7 +131,7 @@ class TestTrainingRoutes:
         }
         
         # Make request
-        response = client.get(f"/train/{MOCK_TASK_ID}/result")
+        response = client.get(f"/api/v1/train/{MOCK_TASK_ID}/result")
         
         # Verify response
         assert response.status_code == 200
@@ -162,7 +162,7 @@ class TestTrainingRoutes:
         }
         
         # Make request
-        response = client.get(f"/train/{MOCK_TASK_ID}/result")
+        response = client.get(f"/api/v1/train/{MOCK_TASK_ID}/result")
         
         # Verify response
         assert response.status_code == 200
@@ -173,7 +173,7 @@ class TestTrainingRoutes:
     def test_get_training_result_not_found(self):
         """Test getting results of a non-existent training task"""
         # Make request with a random UUID that shouldn't exist
-        response = client.get(f"/train/{uuid.uuid4()}/result")
+        response = client.get(f"/api/v1/train/{uuid.uuid4()}/result")
         
         # Verify response
         assert response.status_code == 404
@@ -195,7 +195,7 @@ class TestTrainingRoutes:
         }
         
         # Make request
-        response = client.get(f"/train/{MOCK_TASK_ID}/result")
+        response = client.get(f"/api/v1/train/{MOCK_TASK_ID}/result")
         
         # Verify response
         assert response.status_code == 422
@@ -217,7 +217,7 @@ class TestTrainingRoutes:
         }
         
         # Make request
-        response = client.get(f"/train/{MOCK_TASK_ID}/result")
+        response = client.get(f"/api/v1/train/{MOCK_TASK_ID}/result")
         
         # Verify response
         assert response.status_code == 500

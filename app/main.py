@@ -11,7 +11,7 @@ from fastapi_throttle import RateLimiter
 from app.api.models import router as models_router
 from app.api.predict import router as predict_router
 from app.api.train import router as train_router
-from app.config import REQUIRED_ENV_VARS
+from app.config import REQUIRED_ENV_VARS, FRONTEND_DIR
 from app.utils.validation_utils import validate_env_variables
 
 logger = logging.getLogger("app")
@@ -64,7 +64,7 @@ def create_app() -> FastAPI:
     app.include_router(train_router, prefix=api_prefix)
 
     # Serve frontend files in root path
-    app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")
+    app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
 
     return app
 
