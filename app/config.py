@@ -13,7 +13,6 @@ timezone = pytz.timezone('America/New_York')
 # Load environment variables from .env file
 load_dotenv()
 
-# Define list of required environment variables
 REQUIRED_ENV_VARS = [
     'TYPE',
     'PROJECT_ID',
@@ -29,11 +28,6 @@ REQUIRED_ENV_VARS = [
     'CLIENT_X509_CERT_URL',
     'UNIVERSE_DOMAIN',
 ]
-
-# Check if all required environment variables are set
-for var in REQUIRED_ENV_VARS:
-    if var not in os.environ:
-        raise EnvironmentError(f"Required environment variable '{var}' is not set.")
 
 # Allowed domains for CORS
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "").split(",")

@@ -1,11 +1,38 @@
+import sys
+import logging
+from contextlib import asynccontextmanager
+
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi_throttle import RateLimiter
+
 from app.api.models import router as models_router
 from app.api.predict import router as predict_router
 from app.api.train import router as train_router
+from app.config import REQUIRED_ENV_VARS
+from app.utils.validation_utils import validate_env_variables
+
+logger = logging.getLogger("app")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage app's lifecycle (Startup and Shutdown)."""
+    # Startup
+    missing_vars = validate_env_variables(REQUIRED_ENV_VARS)
+
+    if missing_vars:
+        logger.critical(f"Critical Fail at startup: Missing required environment variables: {', '.join(missing_vars)}")
+        sys.exit(1)
+
+    logger.info("All required environment variables are set. Starting the application.")
+
+    yield # Application execution happens here
+
+    # Shutdown
+    logger.info("Shutting down the application...")
+
 
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""

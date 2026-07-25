@@ -1,5 +1,19 @@
-from datetime import datetime, date
+import os
+from datetime import date, datetime
 import polars as pl
+
+def validate_env_variables(required_vars: list[str]) -> list[str]:
+    """
+    Validates that all required environment variables are set.
+
+    Args:
+        required_vars (list[str]): List of required environment variable names.
+    
+    Returns:
+        list[str]: List of missing environment variable names.
+    """
+    missing_vars = [var for var in required_vars if not os.getenv(var)]
+    return missing_vars
 
 def validate_ticker(ticker: str) -> None:
     """
