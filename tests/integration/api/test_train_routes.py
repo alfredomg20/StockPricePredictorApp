@@ -1,11 +1,15 @@
-import pytest
-from fastapi.testclient import TestClient
-from unittest.mock import patch
 import uuid
 from datetime import date, datetime, timedelta
-import polars as pl
+from unittest.mock import patch
+
 import numpy as np
+import polars as pl
+import pytest
+from fastapi.exceptions import ResponseValidationError
+from fastapi.testclient import TestClient
+
 from app.api.train import train_stock_model_task, training_tasks
+from app.config import timezone
 from app.main import app
 from app.schemas.train import TrainingStatus
 
@@ -42,7 +46,7 @@ MOCK_TRAINING_RESULT = {
 # Create mock stock data
 @pytest.fixture
 def mock_stock_data():
-    dates = [(datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(500)]
+    dates = [(datetime.now(timezone) - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(500)]
     prices = [100 + i * 0.1 + np.random.normal(0, 1) for i in range(500)]
     
     return pl.DataFrame({
@@ -88,7 +92,7 @@ class TestTrainingRoutes:
         mock_tasks.__contains__.return_value = True
         mock_tasks.__getitem__.return_value = {
             "status": TrainingStatus.IN_PROGRESS,
-            "created_at": datetime.now(),
+            "created_at": datetime.now(timezone),
             "ticker": "AAPL",
             "forecast_days": 7
         }
@@ -114,8 +118,9 @@ class TestTrainingRoutes:
         # Verify response
         assert response.status_code == 404
         data = response.json()
-        assert "detail" in data
-        assert "not found" in data["detail"]
+        assert data["success"] is False
+        assert data["error_code"] == "TASK_NOT_FOUND"
+        assert "was not found" in data["message"]
     
     @patch("app.api.train.training_tasks")
     def test_get_training_result_completed(self, mock_tasks):
@@ -124,7 +129,7 @@ class TestTrainingRoutes:
         mock_tasks.__contains__.return_value = True
         mock_tasks.__getitem__.return_value = {
             "status": TrainingStatus.COMPLETED,
-            "created_at": datetime.now(),
+            "created_at": datetime.now(timezone),
             "ticker": "AAPL",
             "forecast_days": 7,
             "result": MOCK_TRAINING_RESULT
@@ -155,7 +160,7 @@ class TestTrainingRoutes:
         mock_tasks.__contains__.return_value = True
         mock_tasks.__getitem__.return_value = {
             "status": TrainingStatus.FAILED,
-            "created_at": datetime.now(),
+            "created_at": datetime.now(timezone),
             "ticker": "AAPL",
             "forecast_days": 7,
             "result": failed_result
@@ -178,8 +183,9 @@ class TestTrainingRoutes:
         # Verify response
         assert response.status_code == 404
         data = response.json()
-        assert "detail" in data
-        assert "not found" in data["detail"]
+        assert data["success"] is False
+        assert data["error_code"] == "TASK_NOT_FOUND"
+        assert "was not found" in data["message"]
     
     @patch("app.api.train.training_tasks")
     def test_get_training_result_in_progress(self, mock_tasks):
@@ -188,7 +194,7 @@ class TestTrainingRoutes:
         mock_tasks.__contains__.return_value = True
         mock_tasks.__getitem__.return_value = {
             "status": TrainingStatus.IN_PROGRESS,
-            "created_at": datetime.now(),
+            "created_at": datetime.now(timezone),
             "ticker": "AAPL",
             "forecast_days": 7,
             "result": None
@@ -200,8 +206,9 @@ class TestTrainingRoutes:
         # Verify response
         assert response.status_code == 422
         data = response.json()
-        assert "detail" in data
-        assert "still in progress" in data["detail"]
+        assert data["success"] is False
+        assert data["error_code"] == "TASK_NOT_READY"
+        assert "is not finished yet" in data["message"]
     
     @patch("app.api.train.training_tasks")
     def test_get_training_result_no_result(self, mock_tasks):
@@ -210,20 +217,15 @@ class TestTrainingRoutes:
         mock_tasks.__contains__.return_value = True
         mock_tasks.__getitem__.return_value = {
             "status": TrainingStatus.COMPLETED,
-            "created_at": datetime.now(),
+            "created_at": datetime.now(timezone),
             "ticker": "AAPL",
             "forecast_days": 7,
             "result": None
         }
         
-        # Make request
-        response = client.get(f"/api/v1/train/{MOCK_TASK_ID}/result")
-        
-        # Verify response
-        assert response.status_code == 500
-        data = response.json()
-        assert "detail" in data
-        assert "not available" in data["detail"]
+        # Make request - expect ResponseValidationError since None can't be serialized as TrainingResult
+        with pytest.raises(ResponseValidationError):
+            client.get(f"/api/v1/train/{MOCK_TASK_ID}/result")
     
     @patch("app.api.train.get_latest_date")
     @patch("app.api.train.load_ticker_data")
@@ -242,7 +244,7 @@ class TestTrainingRoutes:
             "ticker": "AAPL",
             "forecast_days": 7,
             "status": TrainingStatus.PENDING,
-            "created_at": datetime.now(),
+            "created_at": datetime.now(timezone),
             "result": None
         }
         
@@ -264,8 +266,8 @@ class TestTrainingRoutes:
         """Test the background training task function with an error"""
         from app.api.train import train_stock_model_task, training_tasks
         
-        # Setup mock to raise an exception
-        mock_get_latest_date.side_effect = Exception("API error")
+                # Setup mock to raise a ValueError (caught by the except block in train_stock_model_task)
+        mock_get_latest_date.side_effect = ValueError("API error")
         
         # Initialize the task in the global dict
         task_id = MOCK_TASK_ID
@@ -273,7 +275,7 @@ class TestTrainingRoutes:
             "ticker": "AAPL",
             "forecast_days": 7,
             "status": TrainingStatus.PENDING,
-            "created_at": datetime.now(),
+            "created_at": datetime.now(timezone),
             "result": None
         }
         

@@ -1,8 +1,11 @@
-import pytest
-from unittest.mock import patch, MagicMock
 from datetime import datetime
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from app.config import MODELS_DIR, timezone
+from app.exceptions import ModelCorruptedError, ModelNotFoundError
 from app.ml.model_store import ModelStore
-from app.config import MODELS_DIR
 
 # Mock data for models
 MOCK_MODEL_DATA = {
@@ -24,7 +27,7 @@ MOCK_MODEL_DATA = {
         "intercept": 0.5,
         "train_samples": 500,
         "test_samples": 100,
-        "last_train_date": datetime(2023, 1, 1, 12, 0, 0)
+        "last_train_date": datetime(2023, 1, 1, 12, 0, 0).astimezone(timezone)
     },
     "model": MagicMock()
 }
@@ -58,7 +61,7 @@ def mock_joblib():
 class TestModelStore:
     def test_init_creates_directory(self, mock_path):
         """Test that constructor creates model directory"""
-        model_store = ModelStore(MODELS_DIR)
+        _ = ModelStore(MODELS_DIR)
         mock_path.assert_called_once_with(MODELS_DIR)
         mock_path.return_value.mkdir.assert_called_once_with(parents=True, exist_ok=True)
     
@@ -94,17 +97,15 @@ class TestModelStore:
     
     def test_get_all_models_load_error(self, mock_path, mock_joblib):
         """Test handling of joblib load errors"""
-        mock_joblib.load.side_effect = Exception("Failed to load model")
+        mock_joblib.load.side_effect = ModelCorruptedError(ticker="AAPL", forecast_days=7)
         
         model_store = ModelStore(MODELS_DIR)
-        result = model_store.get_all_models()
-        
-        assert result["count"] == 0
-        assert result["models"] == []
+        with pytest.raises(ModelCorruptedError):
+            model_store.get_all_models()
     
     def test_get_model_success(self, mock_path, mock_joblib):
         """Test successful retrieval of specific model"""
-        model_store = ModelStore()
+        model_store = ModelStore(MODELS_DIR)
         result = model_store.get_model("AAPL", 7, "2023-01-01-12:00:00")
         
         assert isinstance(result, dict)
@@ -122,17 +123,20 @@ class TestModelStore:
         """Test when model is not found"""
         mock_path.return_value.__truediv__.return_value.exists.return_value = False
         
-        model_store = ModelStore()
-        with pytest.raises(FileNotFoundError):
+        model_store = ModelStore(MODELS_DIR)
+        with pytest.raises(ModelNotFoundError):
             model_store.get_model("UNKNOWN", 7, "2023-01-01-12:00:00")
     
     def test_get_model_load_error(self, mock_path, mock_joblib):
-        """Test handling of joblib load errors in get_model"""
-        mock_joblib.load.side_effect = Exception("Failed to load model")
+        """Test handling of load errors in get_model"""
+        mock_joblib.load.side_effect = ModelCorruptedError(ticker="AAPL", forecast_days=7)
         
-        model_store = ModelStore()
-        with pytest.raises(Exception):
+        model_store = ModelStore(MODELS_DIR)
+        with pytest.raises(ModelCorruptedError) as excinfo:
             model_store.get_model("AAPL", 7, "2023-01-01-12:00:00")
+
+        assert excinfo.value.ticker == "AAPL"
+        assert excinfo.value.forecast_days == 7
     
     @pytest.mark.parametrize("ticker", ["", " ", None, "A"*11])
     def test_get_model_invalid_ticker(self, ticker, mock_path):
@@ -171,15 +175,15 @@ class TestModelStore:
         mock_path.return_value.__truediv__.return_value.exists.return_value = False
         
         model_store = ModelStore(MODELS_DIR)
-        with pytest.raises(FileNotFoundError):
+        with pytest.raises(ModelNotFoundError):
             model_store.delete_model("UNKNOWN", 7, "2023-01-01-12:00:00")
     
     def test_delete_model_error(self, mock_path):
         """Test handling of errors during deletion"""
-        mock_path.return_value.__truediv__.return_value.unlink.side_effect = Exception("Failed to delete")
+        mock_path.return_value.__truediv__.return_value.unlink.side_effect = OSError("Failed to delete")
         
         model_store = ModelStore(MODELS_DIR)
-        with pytest.raises(Exception):
+        with pytest.raises(OSError):
             model_store.delete_model("AAPL", 7, "2023-01-01-12:00:00")
     
     @pytest.mark.parametrize("ticker", ["", " ", None, "A"*11])

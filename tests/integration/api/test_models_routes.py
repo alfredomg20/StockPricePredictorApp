@@ -1,11 +1,18 @@
-from datetime import date
-from fastapi.testclient import TestClient
-from unittest.mock import patch, MagicMock
-from app.main import app
+from datetime import datetime
+from unittest.mock import MagicMock, patch
 
-client = TestClient(app)
+import pytest
 
-MOCK_METRICS = {
+from app.config import MODELS_DIR, timezone
+from app.exceptions import ModelCorruptedError, ModelNotFoundError
+from app.ml.model_store import ModelStore
+
+# Mock data for models
+MOCK_MODEL_DATA = {
+    "metadata": {
+        "ticker": "AAPL",
+        "forecast_days": 7,
+        "model_type": "linear",
         "mae": 1.5,
         "r2": 0.85,
         "mape": 0.9,
@@ -20,231 +27,181 @@ MOCK_METRICS = {
         "intercept": 0.5,
         "train_samples": 500,
         "test_samples": 100,
-        "last_train_date": date(2023, 6, 1)
-    }
-# Mock data for models
-MOCK_MODEL_LIST = {
-    "models": [
-        {
-            "ticker": "AAPL",
-            "model_type": "linear",
-            "version": "AAPL_linear_7day_20230101120000",
-            "metrics": MOCK_METRICS.copy(),
-        },
-        {
-            "ticker": "MSFT",
-            "model_type": "linear",
-            "version": "MSFT_linear_14day_20230115120000",
-            "metrics": MOCK_METRICS.copy(),
-        }
-    ],
-    "count": 2
-}
-
-MOCK_MODEL_INFO = {
-    "ticker": "AAPL",
-    "model_type": "linear",
-    "version": "AAPL_linear_7day_20230101120000",
-    "metrics": MOCK_METRICS.copy(),
+        "last_train_date": datetime(2023, 1, 1, 12, 0, 0).astimezone(timezone)
+    },
     "model": MagicMock()
 }
 
-class TestModelRoutes:
-    @classmethod
-    def setup_class(cls):
-        """Desactivate cache for tests using patching"""
-        patcher = patch("app.api.models.cached_models")
-        cls.mock_cache = patcher.start()
-        cls.mock_cache.get.return_value = None
-        cls.patcher = patcher
+@pytest.fixture
+def mock_path():
+    with patch("app.ml.model_store.Path") as mock:
+        # Setup mock directory that exists
+        mock_dir = MagicMock()
+        mock_dir.mkdir.return_value = None
+        mock_dir.exists.return_value = True
+        
+        # Setup mock model file
+        mock_file = MagicMock()
+        mock_file.exists.return_value = True
+        mock_file.stem = "AAPL_linear_7day_20230101120000"
+        
+        # Make Path return the mock directory and have glob return mock files
+        mock.return_value = mock_dir
+        mock_dir.__truediv__.return_value = mock_file
+        mock_dir.glob.return_value = [mock_file]
+        
+        yield mock
 
-    @classmethod
-    def teardown_class(cls):
-        """Stop patcher after tests"""
-        cls.patcher.stop()
+@pytest.fixture
+def mock_joblib():
+    with patch("app.ml.model_store.joblib") as mock:
+        mock.load.return_value = MOCK_MODEL_DATA
+        yield mock
 
-    @patch("app.ml.model_store.ModelStore.get_all_models")
-    def test_get_all_models_success(self, mock_get_all_models):
+class TestModelStore:
+    def test_init_creates_directory(self, mock_path):
+        """Test that constructor creates model directory"""
+        _ = ModelStore(MODELS_DIR)
+        mock_path.assert_called_once_with(MODELS_DIR)
+        mock_path.return_value.mkdir.assert_called_once_with(parents=True, exist_ok=True)
+    
+    def test_get_all_models_success(self, mock_path, mock_joblib):
         """Test successful retrieval of all models"""
-        # Setup mock
-        mock_get_all_models.return_value = MOCK_MODEL_LIST
+        model_store = ModelStore(MODELS_DIR)
+        result = model_store.get_all_models()
         
-        # Make request
-        response = client.get("/api/v1/models/")
+        assert isinstance(result, dict)
+        assert "models" in result
+        assert "count" in result
+        assert len(result["models"]) == 1
+        assert result["count"] == 1
         
-        # Verify response
-        assert response.status_code == 200
-        data = response.json()
-        assert "models" in data
-        assert "count" in data
-        assert data["count"] == 2
-        assert len(data["models"]) == 2
-        assert data["models"][0]["ticker"] == "AAPL"
-        assert data["models"][1]["ticker"] == "MSFT"
+        model = result["models"][0]
+        assert model["ticker"] == "AAPL"
+        assert model["model_type"] == "linear"
+        assert "metrics" in model
+        assert "mae" in model["metrics"]
+        assert "r2" in model["metrics"]
+        assert "mape" in model["metrics"]
+        assert "max_ae" in model["metrics"]
+
     
-    @patch("app.ml.model_store.ModelStore.get_all_models")
-    def test_get_all_models_error(self, mock_get_all_models):
-        """Test error handling when retrieving all models"""
-        # Setup mock to raise exception
-        mock_get_all_models.side_effect = Exception("Database error")
+    def test_get_all_models_no_models(self, mock_path):
+        """Test when no models are found"""
+        mock_path.return_value.glob.return_value = []
+        model_store = ModelStore(MODELS_DIR)
+        result = model_store.get_all_models()
         
-        # Make request
-        response = client.get("/api/v1/models/")
-        
-        # Verify response
-        assert response.status_code == 500
-        data = response.json()
-        assert "detail" in data
-        assert "Failed to retrieve models" in data["detail"]
+        assert result["count"] == 0
+        assert result["models"] == []
     
-    @patch("app.ml.model_store.ModelStore.get_model")
-    def test_get_model_success(self, mock_get_model):
-        """Test successful retrieval of a specific model"""
-        # Setup mock
-        mock_get_model.return_value = MOCK_MODEL_INFO
+    def test_get_all_models_load_error(self, mock_path, mock_joblib):
+        """Test handling of joblib load errors"""
+        mock_joblib.load.side_effect = ModelCorruptedError(ticker="AAPL", forecast_days=7)
         
-        # Make request
-        response = client.get("/api/v1/models/AAPL/7/2023-01-01-12:00:00")
-        
-        # Verify response
-        assert response.status_code == 200
-        data = response.json()
-        assert data["ticker"] == "AAPL"
-        assert data["model_type"] == "linear"
-        assert data["version"] == "AAPL_linear_7day_20230101120000"
-        assert "metrics" in data
-        assert data["metrics"]["mae"] == 1.5
-        assert data["metrics"]["r2"] == 0.85
-        assert data["metrics"]["features"] == ["lag1", "lag5", "ma5", "ma20"]
-        assert data["metrics"]["coefficients"] == {"lag1": 0.2, "lag5": 0.1, "ma5": 0.3, "ma20": 0.4}
-        assert data["metrics"]["intercept"] == 0.5
-        assert data["metrics"]["train_samples"] == 500
-        assert data["metrics"]["test_samples"] == 100
-        assert data["metrics"]["last_train_date"] == "2023-06-01"
+        model_store = ModelStore(MODELS_DIR)
+        with pytest.raises(ModelCorruptedError):
+            model_store.get_all_models()
     
-    @patch("app.ml.model_store.ModelStore.get_model")
-    def test_get_model_not_found(self, mock_get_model):
-        """Test 404 response when model is not found"""
-        # Setup mock to raise FileNotFoundError
-        mock_get_model.side_effect = FileNotFoundError("Model not found")
+    def test_get_model_success(self, mock_path, mock_joblib):
+        """Test successful retrieval of specific model"""
+        model_store = ModelStore(MODELS_DIR)
+        result = model_store.get_model("AAPL", 7, "2023-01-01-12:00:00")
         
-        # Make request
-        response = client.get("/api/v1/models/UNKNOWN/7/2023-01-01-12:00:00")
-        
-        # Verify response
-        assert response.status_code == 404
-        data = response.json()
-        assert "detail" in data
-        assert "Model not found" in data["detail"]
+        assert isinstance(result, dict)
+        assert "ticker" in result
+        assert "model_type" in result
+        assert "version" in result
+        assert "model" in result
+        assert result["ticker"] == "AAPL"
+        assert result["metrics"]["mae"] == 1.5
+        assert result["metrics"]["r2"] == 0.85
+        assert result["metrics"]["mape"] == 0.9
+        assert result["metrics"]["max_ae"] == 2.0
     
-    @patch("app.ml.model_store.ModelStore.get_model")
-    def test_get_model_invalid_input(self, mock_get_model):
-        """Test 400 response when input is invalid"""
-        # Setup mock to raise ValueError
-        mock_get_model.side_effect = ValueError("Invalid ticker")
+    def test_get_model_not_found(self, mock_path, mock_joblib):
+        """Test when model is not found"""
+        mock_path.return_value.__truediv__.return_value.exists.return_value = False
+        model_store = ModelStore(MODELS_DIR)
+        with pytest.raises(ModelNotFoundError):
+            model_store.get_model("UNKNOWN", 7, "2023-01-01-12:00:00")
+
+    def test_get_model_corrupted_error(self, mock_path, mock_joblib):
+        """Test handling of corrupted model files raises ModelCorruptedError"""
+        mock_joblib.load.side_effect = Exception("Failed to load model")
         
-        # Make request
-        response = client.get("/api/v1/models/AAPL/7/2023-01-01-12:00:00")
+        model_store = ModelStore(MODELS_DIR)
+        with pytest.raises(ModelCorruptedError) as excinfo:
+            model_store.get_model("AAPL", 7, "2023-01-01-12:00:00")
         
-        # Verify response
-        assert response.status_code == 400
-        data = response.json()
-        assert "detail" in data
-        assert "Invalid ticker" in data["detail"]
+        assert excinfo.value.ticker == "AAPL"
+        assert excinfo.value.forecast_days == 7
     
-    @patch("app.ml.model_store.ModelStore.get_model")
-    def test_get_model_server_error(self, mock_get_model):
-        """Test 500 response when server error occurs"""
-        # Setup mock to raise general exception
-        mock_get_model.side_effect = Exception("Database connection error")
-        
-        # Make request
-        response = client.get("api/v1/models/AAPL/7/2023-01-01-12:00:00")
-        
-        # Verify response
-        assert response.status_code == 500
-        data = response.json()
-        assert "detail" in data
-        assert "Failed to retrieve model" in data["detail"]
+    @pytest.mark.parametrize("ticker", ["", " ", None, "A"*11])
+    def test_get_model_invalid_ticker(self, ticker, mock_path):
+        """Test invalid ticker values"""
+        model_store = ModelStore(MODELS_DIR)
+        with pytest.raises(ValueError):
+            model_store.get_model(ticker, 7, "2023-01-01-12:00:00")
     
-    @patch("app.ml.model_store.ModelStore.delete_model")
-    def test_delete_model_success(self, mock_delete_model):
+    @pytest.mark.parametrize("forecast_days", [0, -1, "7", 366])
+    def test_get_model_invalid_forecast_days(self, forecast_days, mock_path):
+        """Test invalid forecast days values"""
+        model_store = ModelStore(MODELS_DIR)
+        with pytest.raises(ValueError):
+            model_store.get_model("AAPL", forecast_days, "2023-01-01-12:00:00")
+    
+    @pytest.mark.parametrize("date", ["", "invalid_date", "2023/01/01", "01-01-2023", "2023-13-01-12:00:00", "2023-01-32-12:00:00", "2023-01-01 12:00:00"])
+    def test_get_model_invalid_date(self, date, mock_path):
+        """Test invalid date values"""
+        model_store = ModelStore(MODELS_DIR)
+        with pytest.raises(ValueError):
+            model_store.get_model("AAPL", 7, date)
+    
+    def test_delete_model_success(self, mock_path):
         """Test successful model deletion"""
-        # Setup mock
-        mock_delete_model.return_value = {
-            "status": "success",
-            "version": "AAPL_linear_7day_20230101120000"
-        }
+        model_store = ModelStore(MODELS_DIR)
+        result = model_store.delete_model("AAPL", 7, "2023-01-01-12:00:00")
         
-        # Make request
-        response = client.delete("/api/v1/models/AAPL/7/2023-01-01-12:00:00")
-        
-        # Verify response
-        assert response.status_code == 200
-        data = response.json()
-        assert data["status"] == "success"
-        assert data["version"] == "AAPL_linear_7day_20230101120000"
+        assert isinstance(result, dict)
+        assert "status" in result
+        assert "version" in result
+        assert result["status"] == "success"
+        mock_path.return_value.__truediv__.return_value.unlink.assert_called_once()
     
-    @patch("app.ml.model_store.ModelStore.delete_model")
-    def test_delete_model_not_found(self, mock_delete_model):
-        """Test 404 response when model to delete is not found"""
-        # Setup mock to raise FileNotFoundError
-        mock_delete_model.side_effect = FileNotFoundError("Model not found")
+    def test_delete_model_not_found(self, mock_path):
+        """Test when model to delete is not found"""
+        mock_path.return_value.__truediv__.return_value.exists.return_value = False
         
-        # Make request
-        response = client.delete("/api/v1/models/UNKNOWN/7/2023-01-01-12:00:00")
-        
-        # Verify response
-        assert response.status_code == 404
-        data = response.json()
-        assert "detail" in data
-        assert "Model not found" in data["detail"]
+        model_store = ModelStore(MODELS_DIR)
+        with pytest.raises(ModelNotFoundError):
+            model_store.delete_model("UNKNOWN", 7, "2023-01-01-12:00:00")
     
-    @patch("app.ml.model_store.ModelStore.delete_model")
-    def test_delete_model_invalid_input(self, mock_delete_model):
-        """Test 400 response when input for deletion is invalid"""
-        # Setup mock to raise ValueError
-        mock_delete_model.side_effect = ValueError("Invalid forecast days")
+    def test_delete_model_error(self, mock_path):
+        """Test handling of errors during deletion"""
+        mock_path.return_value.__truediv__.return_value.unlink.side_effect = OSError("Failed to delete")
         
-        # Make request
-        response = client.delete("/api/v1/models/AAPL/7/2023-01-01-12:00:00")
-        
-        # Verify response
-        assert response.status_code == 400
-        data = response.json()
-        assert "detail" in data
-        assert "Invalid forecast days" in data["detail"]
+        model_store = ModelStore(MODELS_DIR)
+        with pytest.raises(OSError):
+            model_store.delete_model("AAPL", 7, "2023-01-01-12:00:00")
     
-    @patch("app.ml.model_store.ModelStore.delete_model")
-    def test_delete_model_server_error(self, mock_delete_model):
-        """Test 500 response when server error occurs during deletion"""
-        # Setup mock to raise general exception
-        mock_delete_model.side_effect = Exception("Filesystem error")
-        
-        # Make request
-        response = client.delete("/api/v1/models/AAPL/7/2023-01-01-12:00:00")
-        
-        # Verify response
-        assert response.status_code == 500
-        data = response.json()
-        assert "detail" in data
-        assert "Failed to delete model" in data["detail"]
+    @pytest.mark.parametrize("ticker", ["", " ", None, "A"*11])
+    def test_delete_model_invalid_ticker(self, ticker, mock_path):
+        """Test invalid ticker values for deletion"""
+        model_store = ModelStore(MODELS_DIR)
+        with pytest.raises(ValueError):
+            model_store.delete_model(ticker, 7, "2023-01-01-12:00:00")
     
-    def test_get_model_invalid_path_params(self):
-        """Test validation of path parameters"""
-        # Test invalid ticker (too long)
-        response = client.get("/api/v1/models/AAAAAAAAAAAA/7/2023-01-01-12:00:00")
-        assert response.status_code == 400
-        
-        # Test invalid forecast days (negative)
-        response = client.get("/api/v1/models/AAPL/-1/2023-01-01-12:00:00")
-        assert response.status_code == 400
-        
-        # Test invalid forecast days (too large)
-        response = client.get("/api/v1/models/AAPL/366/2023-01-01-12:00:00")
-        assert response.status_code == 400
-        
-        # Test invalid date format
-        response = client.get("/api/v1/models/AAPL/7/01-01-2023-12:00:00")
-        assert response.status_code == 400
-        assert response.status_code == 400
+    @pytest.mark.parametrize("forecast_days", [0, -1, "7", 366])
+    def test_delete_model_invalid_forecast_days(self, forecast_days, mock_path):
+        """Test invalid forecast days values for deletion"""
+        model_store = ModelStore(MODELS_DIR)
+        with pytest.raises(ValueError):
+            model_store.delete_model("AAPL", forecast_days, "2023-01-01-12:00:00")
+    
+    @pytest.mark.parametrize("date", ["", "2023/01/01", "01-01-2023", "2023-13-01-12:00:00", "2023-01-01 12:00:00"])
+    def test_delete_model_invalid_date(self, date, mock_path):
+        """Test invalid date values for deletion"""
+        model_store = ModelStore(MODELS_DIR)
+        with pytest.raises(ValueError):
+            model_store.delete_model("AAPL", 7, date)

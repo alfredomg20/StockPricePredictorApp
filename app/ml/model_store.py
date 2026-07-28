@@ -1,151 +1,130 @@
-import joblib
 from datetime import datetime
 from pathlib import Path
-from app.config import logger
-from app.utils.validation_utils import validate_datetime, validate_forecast_days, validate_ticker
+from typing import Any
+
+import joblib
+
+from app.config import logger, timezone
+from app.exceptions import ModelCorruptedError, ModelNotFoundError
+from app.utils.validation_utils import (
+    validate_datetime,
+    validate_forecast_days,
+    validate_ticker,
+)
+
 
 class ModelStore:
     """Manage storage and retrieval of trained models."""
+
     def __init__(self, model_dir: Path | str):
         self.model_dir = Path(model_dir)
         self.model_dir.mkdir(parents=True, exist_ok=True)
 
     def _validate_model_params(self, ticker: str, forecast_days: int, last_trained_time: str) -> None:
-        """
-        Validate model parameters for retrieval or deletion.
-        
-        Args:
-            ticker (str): Stock ticker symbol.
-            forecast_days (int): Number of days to forecast.
-            last_trained_time (str): Last trained time in 'YYYY-MM-DD-HH:MM:SS' format.
-        
-        Raises:
-            ValueError: If any parameter is invalid.
-        """
+        """Validate model parameters for retrieval or deletion."""
         validate_ticker(ticker)
         validate_forecast_days(forecast_days)
         validate_datetime(last_trained_time)
 
-    def get_all_models(self) -> dict[str, any]:
-        """
-        Retrieve all models stored in the model directory.
-
-        Returns:
-            dict: A dictionary containing a list of models and the count of models.
-        """
-        try:
-            models = []
-            for model_file in self.model_dir.glob("*.joblib"):
-                try:
-                    model_data = joblib.load(model_file)
-                    models.append({
-                        "ticker": model_data["metadata"]["ticker"],
-                        "model_type": model_data["metadata"]["model_type"],
-                        "version": model_file.stem,
-                        "metrics": {
-                            "mae": model_data["metadata"]["mae"],
-                            "r2": model_data["metadata"]["r2"],
-                            "mape": model_data["metadata"]["mape"],
-                            "max_ae": model_data["metadata"]["max_ae"],
-                            "features": model_data["metadata"]["features"],
-                            "coefficients": model_data["metadata"]["coefficients"],
-                            "intercept": model_data["metadata"]["intercept"],
-                            "train_samples": model_data["metadata"]["train_samples"],
-                            "test_samples": model_data["metadata"]["test_samples"],
-                            "last_train_date": model_data["metadata"]["last_train_date"]
-                        }
-                    })
-                except Exception as e:
-                    logger.warning(f"Corrupt model file {model_file}: {e}")
-                    continue
-        
-            if not models:
-                logger.info("No models found in the directory")
-                return {"models": [], "count": 0}
-                    
-            return {
-                "models": models,
-                "count": len(models)
-            }
-        except Exception as e:
-            logger.error(f"Failed listing models: {e}")
-            raise e
-    
-    def get_model(self, ticker: str, forecast_days: int, last_trained_time: str) -> dict[str, any]:
-        """
-        Retrieve a specific model using filepath parameters.
-
-        Args:
-            ticker (str): Stock ticker symbol.
-            forecast_days (int): Number of days to forecast.
-            last_trained_time (str): Last trained time in 'YYYY-MM-DD-HH:MM:SS' format.
-        
-        Returns:
-            dict: A dictionary containing model metadata and the model itself.
-        """
-        # Validate inputs
+    def _build_model_filename(self, ticker: str, forecast_days: int, last_trained_time: str) -> tuple[str, Path]:
+        """Helper to generate the standardized version string and file Path."""
         self._validate_model_params(ticker, forecast_days, last_trained_time)
-
-        # Get model path using parameters
-        last_train_time_str = datetime.strptime(last_trained_time, "%Y-%m-%d-%H:%M:%S").strftime("%Y%m%d%H%M%S")
+        
+        last_train_dt = datetime.strptime(last_trained_time, "%Y-%m-%d-%H:%M:%S").astimezone(timezone)
+        last_train_time_str = last_train_dt.strftime("%Y%m%d%H%M%S")
+        
         version = f"{ticker}_linear_{forecast_days}day_{last_train_time_str}"
         model_path = self.model_dir / f"{version}.joblib"
+        return version, model_path
+
+    def get_all_models(self) -> dict[str, Any]:
+        """Retrieve all models stored in the model directory."""
+        models = []
+        
+        for model_file in self.model_dir.glob("*.joblib"):
+            try:
+                model_data = joblib.load(model_file)
+                meta = model_data["metadata"]
+                
+                models.append({
+                    "ticker": meta["ticker"],
+                    "model_type": meta["model_type"],
+                    "version": model_file.stem,
+                    "metrics": {
+                        "mae": meta["mae"],
+                        "r2": meta["r2"],
+                        "mape": meta["mape"],
+                        "max_ae": meta["max_ae"],
+                        "features": meta["features"],
+                        "coefficients": meta["coefficients"],
+                        "intercept": meta["intercept"],
+                        "train_samples": meta["train_samples"],
+                        "test_samples": meta["test_samples"],
+                        "last_train_date": meta["last_train_date"],
+                    },
+                })
+            except (KeyError, TypeError) as e:
+                logger.warning(f"Skipping corrupt or invalid model file {model_file.name}: {e}")
+                continue
+
+        if not models:
+            logger.info("No models found in the directory.")
+            return {"models": [], "count": 0}
+
+        return {"models": models, "count": len(models)}
+
+    def get_model(self, ticker: str, forecast_days: int, last_trained_time: str) -> dict[str, Any]:
+        """Retrieve a specific model using filepath parameters.
+
+        Raises:
+            ModelNotFoundError: File does not exist in storage.
+            ModelCorruptedError: File exists but fails joblib deserialization or structure reading.
+        """
+        version, model_path = self._build_model_filename(ticker, forecast_days, last_trained_time)
 
         if not model_path.exists():
-            logger.error(f"Model version {version} not found")
-            raise FileNotFoundError(f"Model version {version} does not exist.")
+            raise ModelNotFoundError(ticker=ticker, forecast_days=forecast_days)
+
         try:
             model_data = joblib.load(model_path)
+            meta = model_data["metadata"]
+
             return {
-                "ticker": model_data["metadata"]["ticker"],
-                "model_type": model_data["metadata"]["model_type"],
+                "ticker": meta["ticker"],
+                "model_type": meta["model_type"],
                 "version": version,
                 "metrics": {
-                    "mae": model_data["metadata"]["mae"],
-                    "r2": model_data["metadata"]["r2"],
-                    "mape": model_data["metadata"]["mape"],
-                    "max_ae": model_data["metadata"]["max_ae"],
-                    "features": model_data["metadata"]["features"],
-                    "coefficients": model_data["metadata"]["coefficients"],
-                    "intercept": model_data["metadata"]["intercept"],
-                    "train_samples": model_data["metadata"]["train_samples"],
-                    "test_samples": model_data["metadata"]["test_samples"],
-                    "last_train_date": model_data["metadata"]["last_train_date"]
+                    "mae": meta["mae"],
+                    "r2": meta["r2"],
+                    "mape": meta["mape"],
+                    "max_ae": meta["max_ae"],
+                    "features": meta["features"],
+                    "coefficients": meta["coefficients"],
+                    "intercept": meta["intercept"],
+                    "train_samples": meta["train_samples"],
+                    "test_samples": meta["test_samples"],
+                    "last_train_date": meta["last_train_date"],
                 },
-                "model": model_data["model"]
+                "model": model_data["model"],
             }
-        except Exception as e:
-            logger.error(f"Failed to load model {version}: {str(e)}")
-            raise e
-        
-    def delete_model(self, ticker: str, forecast_days: int, last_trained_time: str) -> dict[str, any]:
-        """
-        Delete a specific model using filepath parameters.
+        except (KeyError, TypeError, Exception) as e:
+            raise ModelCorruptedError(ticker=ticker, forecast_days=forecast_days) from e
 
-        Args:
-            ticker (str): Stock ticker symbol.
-            forecast_days (int): Number of days to forecast.
-            last_trained_time (str): Last trained time in 'YYYY-MM-DD-HH:MM:SS' format.
-        
-        Returns:
-            dict: A dictionary containing the status of the deletion and the version of the deleted model.
-        """
-        # Validate inputs
-        self._validate_model_params(ticker, forecast_days, last_trained_time)
+    def delete_model(self, ticker: str, forecast_days: int, last_trained_time: str) -> dict[str, Any]:
+        """Delete a specific model using filepath parameters.
 
-        # Get model path using parameters
-        last_train_time_str = datetime.strptime(last_trained_time, "%Y-%m-%d-%H:%M:%S").strftime("%Y%m%d%H%M%S")
-        version = f"{ticker}_linear_{forecast_days}day_{last_train_time_str}"
-        model_path = self.model_dir / f"{version}.joblib"
-        
+        Raises:
+            ModelNotFoundError: File does not exist.
+        """
+        version, model_path = self._build_model_filename(ticker, forecast_days, last_trained_time)
+
         if not model_path.exists():
-            logger.error(f"Model version {version} not found for deletion")
-            raise FileNotFoundError(f"Model version {version} does not exist.")
+            raise ModelNotFoundError(ticker=ticker, forecast_days=forecast_days)
+
         try:
             model_path.unlink()
-            logger.info(f"Deleted model: {version}")
+            logger.info(f"Successfully deleted model version {version}")
             return {"status": "success", "version": version}
-        except Exception as e:
-            logger.error(f"Failed to delete {version}: {str(e)}")
-            raise e
-
+        except OSError as e:
+            logger.error(f"IO/OS Error deleting model file {version}: {e}")
+            raise

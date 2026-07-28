@@ -1,35 +1,39 @@
-import uuid
 import time
+import uuid
 from datetime import datetime, timedelta
-from fastapi import APIRouter, BackgroundTasks, HTTPException, status
-from app.config import logger
-from app.schemas.models import ModelMetrics
-from app.schemas.train import (
-    TrainingRequest, 
-    TrainingTaskResponse, 
-    TrainingResult,
-    TrainingStatus
-)
-from app.ml.data_loader import load_ticker_data, get_latest_date
+
+from fastapi import APIRouter, BackgroundTasks, Depends, status
+
+from app.api.models import get_model_store
+from app.config import logger, timezone
+from app.exceptions import TaskNotFoundError, TaskNotReadyError
+from app.ml.data_loader import get_latest_date, load_ticker_data
 from app.ml.model_store import ModelStore
 from app.ml.trainer import StockPriceTrainer
+from app.schemas.models import ModelMetrics
+from app.schemas.train import (
+    TrainingRequest,
+    TrainingResult,
+    TrainingStatus,
+    TrainingTaskResponse,
+)
 
 # Create the router
 router = APIRouter(
     prefix="/train",
     tags=["training"],
-    responses={404: {"description": "Not found"}},
 )
 
 # In-memory storage for training tasks
 training_tasks = {}
+
 
 async def train_stock_model_task(
     task_id: str, 
     ticker: str, 
     forecast_days: int
 ):
-    """Background task to train a stock price prediction model"""
+    """Background task to train a stock price prediction model."""
     try:
         # Update task status
         training_tasks[task_id]["status"] = TrainingStatus.IN_PROGRESS
@@ -39,7 +43,7 @@ async def train_stock_model_task(
         latest_date = get_latest_date(ticker)
         years = 3
         days_in_year = 365
-        start_date = (datetime.now() - timedelta(days=years*days_in_year)).strftime("%Y-%m-%d")
+        start_date = (datetime.now(timezone) - timedelta(days=years * days_in_year)).strftime("%Y-%m-%d")
         df = load_ticker_data(ticker=ticker, start_date=start_date, end_date=latest_date)
         
         # Initialize and run the training pipeline
@@ -60,8 +64,8 @@ async def train_stock_model_task(
         })
         logger.info(f"Training completed for task {task_id}, ticker {ticker}")
 
-    except Exception as e:
-        logger.error(f"Training failed for task {task_id}: {str(e)}")
+    except (ValueError, KeyError, FileNotFoundError, RuntimeError) as e:
+        logger.error(f"Training failed for task {task_id}: {e!s}", exc_info=True)
         training_tasks[task_id].update({
             "status": TrainingStatus.FAILED,
             "result": {
@@ -72,30 +76,35 @@ async def train_stock_model_task(
             }
         })
 
+
 @router.post("/", response_model=TrainingTaskResponse, status_code=status.HTTP_202_ACCEPTED)
 async def start_training(
     request: TrainingRequest, 
-    background_tasks: BackgroundTasks
+    background_tasks: BackgroundTasks,
+    model_store: ModelStore = Depends(get_model_store)
 ):
     """
     Endpoint to start a new model training task.
-    
     Returns a task ID that can be used to check the training status.
     """
     # Check if an up-to-date model already exists
     trainer = StockPriceTrainer()
     if not trainer.needs_training(request.ticker, request.forecast_days):
-        logger.info(f"Up-to-date model already exists for {request.ticker} with {request.forecast_days} days forecast, skipping training.")
+        logger.info(
+            f"Up-to-date model already exists for {request.ticker} "
+            f"with {request.forecast_days} days forecast, skipping training."
+        )
         # Get metrics from the latest model
         latest_model_path = trainer._get_latest_model_path(request.ticker, request.forecast_days)
         last_trained_time_str = str(latest_model_path).split('_')[-1].replace('.joblib', '')
-        last_trained_time = datetime.strptime(last_trained_time_str, "%Y%m%d%H%M%S").strftime("%Y-%m-%d-%H:%M:%S")
-        latest_model = ModelStore().get_model(request.ticker, request.forecast_days, last_trained_time)
+        parsed_dt = datetime.strptime(last_trained_time_str, "%Y%m%d%H%M%S").replace(tzinfo=timezone)
+        last_trained_time = parsed_dt.strftime("%Y-%m-%d-%H:%M:%S")
+        latest_model = model_store.get_model(request.ticker, request.forecast_days, last_trained_time)
 
         return TrainingTaskResponse(
             task_id="",
             status=TrainingStatus.SKIPPED,
-            submitted_at=datetime.now(),
+            submitted_at=datetime.now(timezone),
             ticker=request.ticker,
             forecast_days=request.forecast_days,
             metrics=ModelMetrics(
@@ -120,7 +129,7 @@ async def start_training(
     task_response = TrainingTaskResponse(
         task_id=task_id,
         status=TrainingStatus.PENDING,
-        submitted_at=datetime.now(),
+        submitted_at=datetime.now(timezone),
         ticker=request.ticker,
         forecast_days=request.forecast_days,
         message="Training started in background"
@@ -131,7 +140,7 @@ async def start_training(
         "ticker": request.ticker,
         "forecast_days": request.forecast_days,
         "status": TrainingStatus.PENDING,
-        "created_at": datetime.now(),
+        "created_at": datetime.now(timezone),
         "result": None
     }
     
@@ -146,16 +155,12 @@ async def start_training(
     logger.info(f"Training task {task_id} started for ticker {request.ticker}")
     return task_response
 
+
 @router.get("/{task_id}/status", response_model=TrainingTaskResponse)
 async def get_training_status(task_id: str):
-    """
-    Get the current status of a training task.
-    """
+    """Get the current status of a training task."""
     if task_id not in training_tasks:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Training task {task_id} not found"
-        )
+        raise TaskNotFoundError(task_id=task_id)
     
     task_info = training_tasks[task_id]
 
@@ -168,30 +173,17 @@ async def get_training_status(task_id: str):
         message=f"Training status: {task_info['status']}"
     )
 
+
 @router.get("/{task_id}/result", response_model=TrainingResult)
 async def get_training_result(task_id: str):
-    """
-    Get the results of a completed training task.
-    """
+    """Get the results of a completed training task."""
     if task_id not in training_tasks:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Training task {task_id} not found"
-        )
+        raise TaskNotFoundError(task_id=task_id)
     
     task_info = training_tasks[task_id]
+    current_status = task_info["status"]
     
-    if task_info["status"] not in [TrainingStatus.COMPLETED, TrainingStatus.FAILED]:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Training task {task_id} is still in progress or pending"
-        )
-    
-    if not task_info.get("result"):
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Training result not available for task {task_id}"
-        )
+    if current_status not in [TrainingStatus.COMPLETED, TrainingStatus.FAILED]:
+        raise TaskNotReadyError(task_id=task_id, status=current_status)
     
     return task_info["result"]
-

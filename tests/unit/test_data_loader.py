@@ -1,34 +1,32 @@
-import pytest
-from unittest.mock import patch, MagicMock
-import polars as pl
 from datetime import datetime
-from app.ml.data_loader import load_ticker_data, get_latest_date, invalidate_latest_date_cache
+from unittest.mock import MagicMock, patch
+
+import polars as pl
+import pytest
 from google.cloud.bigquery import QueryJob
+
+from app.config import timezone
+from app.exceptions import DataFetchError, InsufficientDataError
+from app.ml.data_loader import (
+    get_latest_date,
+    invalidate_latest_date_cache,
+    load_ticker_data,
+)
 
 # Mock data for successful queries
 MOCK_STOCK_DATA = [
     {
-        "date": datetime(2023, 1, 1),
-        "price": 150.0,
-        "lag1": 149.5,
-        "lag5": 148.0,
-        "lag20": 145.0,
-        "lag100": 140.0,
-        "ma5": 149.0,
-        "ma20": 147.0,
-        "ma100": 142.0,
-    },
-    {
-        "date": datetime(2023, 1, 2),
-        "price": 151.0,
-        "lag1": 150.0,
-        "lag5": 149.0,
-        "lag20": 146.0,
-        "lag100": 141.0,
-        "ma5": 149.5,
-        "ma20": 147.5,
-        "ma100": 142.5,
-    },
+        "date": datetime(2023, 1, i+1).astimezone(timezone),
+        "price": 150.0 + i,
+        "lag1": 149.5 + i,
+        "lag5": 148.0 + i,
+        "lag20": 145.0 + i,
+        "lag100": 140.0 + i,
+        "ma5": 149.0 + i,
+        "ma20": 147.0 + i,
+        "ma100": 142.0 + i,
+    }
+    for i in range(10)
 ]
 
 @pytest.fixture
@@ -66,21 +64,22 @@ class TestLoadTickerData:
         """Test loading data with valid inputs"""
         mock_bigquery_client.return_value.query.return_value = mock_query_job
         
-        df = load_ticker_data("AAPL", "2023-01-01", "2023-01-02")
+        df = load_ticker_data("AAPL", "2023-01-01", "2023-01-10")
         
         assert isinstance(df, pl.DataFrame)
-        assert len(df) == 2
+        assert len(df) == 10
         assert "price" in df.columns
         assert "ma100" in df.columns
 
-    def test_empty_data_raises_value_error(self, mock_bigquery_client, mock_empty_query_job):
-        """Test that empty data raises ValueError"""
+    def test_empty_data_raises_insufficient_data_error(self, mock_bigquery_client, mock_empty_query_job):
+        """Test that empty data raises InsufficientDataError"""
         mock_bigquery_client.return_value.query.return_value = mock_empty_query_job
         
-        with pytest.raises(ValueError) as excinfo:
+        with pytest.raises(InsufficientDataError) as excinfo:
             load_ticker_data("UNKNOWN", "2023-01-01", "2023-01-02")
         
-        assert "No data found" in str(excinfo.value)
+        assert "Insufficient stock data" in str(excinfo.value)
+        assert excinfo.value.ticker == "UNKNOWN"
 
     @pytest.mark.parametrize("ticker", ["", " ", None, "A"*11])
     def test_invalid_ticker(self, ticker, mock_bigquery_client):
@@ -106,19 +105,20 @@ class TestLoadTickerData:
 
     def test_bigquery_failure(self, mock_bigquery_client):
         """Test BigQuery failure scenario"""
-        mock_bigquery_client.return_value.query.side_effect = Exception("BigQuery error")
+        mock_bigquery_client.return_value.query.side_effect = Exception("BigQuery connection timeout")
         
-        with pytest.raises(RuntimeError) as excinfo:
+        with pytest.raises(DataFetchError) as excinfo:
             load_ticker_data("AAPL", "2023-01-01", "2023-01-02")
         
-        assert "Failed to load data" in str(excinfo.value)
+        assert "Failed to fetch stock data" in str(excinfo.value)
+        assert "BigQuery connection timeout" in str(excinfo.value)
 
 class TestGetLatestDate:    
     def test_get_latest_date_success(self, mock_bigquery_client):
         """Test successful retrieval of latest date"""
         mock_result = MagicMock()
         mock_result.to_dataframe.return_value = pl.DataFrame({
-            "latest_date": [datetime(2023, 1, 2)]
+            "latest_date": [datetime(2023, 1, 2).astimezone(timezone)]
         }).to_pandas()
         
         mock_query_job = MagicMock()
@@ -141,8 +141,10 @@ class TestGetLatestDate:
         mock_client = mock_bigquery_client.return_value
         mock_client.query.return_value = mock_query_job
 
-        with pytest.raises(ValueError):
+        with pytest.raises(InsufficientDataError) as excinfo:
             get_latest_date("UNKNOWN")
+        
+        assert excinfo.value.ticker == "UNKNOWN"
 
     @pytest.mark.parametrize("ticker", ["", " ", None, "A"*11])
     def test_invalid_ticker(self, ticker, mock_bigquery_client):
@@ -155,9 +157,10 @@ class TestGetLatestDate:
         ticker = "AAPL"
         invalidate_latest_date_cache(ticker)
 
-        mock_bigquery_client.return_value.query.side_effect = Exception("BigQuery error")
+        mock_bigquery_client.return_value.query.side_effect = Exception("BigQuery connection timeout")
 
-        with pytest.raises(RuntimeError) as excinfo:
+        with pytest.raises(DataFetchError) as excinfo:
             get_latest_date(ticker)
         
-        assert "Failed to retrieve latest date" in str(excinfo.value)
+        assert "Failed to fetch stock data" in str(excinfo.value)
+        assert excinfo.value.ticker == ticker

@@ -1,8 +1,10 @@
-from cachetools import TTLCache
 import polars as pl
-from app.config import CREDENTIALS_DICT, PROJECT_ID, DATASET_ID, STOCKS_TABLE_ID
+from cachetools import TTLCache
+
+from app.config import CREDENTIALS_DICT, DATASET_ID, PROJECT_ID, STOCKS_TABLE_ID
+from app.exceptions import DataFetchError, InsufficientDataError
 from app.utils.google_cloud_utils import get_bigquery_client
-from app.utils.validation_utils import validate_ticker, validate_date_range
+from app.utils.validation_utils import validate_date_range, validate_ticker
 
 # Configure caching
 time_to_live = 3600  # 1 hour lifetime
@@ -15,7 +17,7 @@ def invalidate_ticker_data_cache(ticker: str):
     Args:
         ticker (str): Stock ticker symbol.
     """
-    keys_to_delete = [k for k in cached_ticker_data.keys() if k.startswith(f"{ticker}:")]
+    keys_to_delete = [k for k in cached_ticker_data if k.startswith(f"{ticker}:")]
     for k in keys_to_delete:
         del cached_ticker_data[k]
 
@@ -88,10 +90,11 @@ def load_ticker_data(ticker: str, start_date: str, end_date: str) -> pl.DataFram
         query_job = client.query(query)
         df = pl.from_arrow(query_job.to_arrow())
     except Exception as e:
-        raise RuntimeError(f"Failed to load data for ticker {ticker} from BigQuery: {e}")
-    if df.is_empty():
-        raise ValueError(f"No data found for ticker {ticker} in the specified date range.")
-    # Cache the DataFrame
+        raise DataFetchError(ticker=ticker, original_error=str(e)) from e
+
+    if df.is_empty() or df.height < 10:
+        raise InsufficientDataError(ticker=ticker, required_samples=10, actual_samples=df.height if not df.is_empty() else 0)
+
     cached_ticker_data[cache_key] = df
     return df
 
@@ -122,15 +125,13 @@ def get_latest_date(ticker: str) -> str:
         query_job = client.query(query)
         result = query_job.result()
         df = result.to_dataframe()
-        if df.empty:
-            raise ValueError("No data found for the specified ticker.")
-        latest_date = df['latest_date'].iloc[0]
-        latest_date_str = latest_date.strftime('%Y-%m-%d')
-        # Cache the latest date
-        cached_latest_date[ticker] = latest_date_str
-        return latest_date_str
-    except ValueError as ve:
-        raise ValueError(f"No data found for ticker {ticker}: {ve}")
     except Exception as e:
-        raise RuntimeError(f"Failed to retrieve latest date for ticker {ticker}: {e}")
+        raise DataFetchError(ticker=ticker, original_error=str(e)) from e
     
+    if df.empty or df['latest_date'].iloc[0] is None:
+        raise InsufficientDataError(ticker=ticker, required_samples=1, actual_samples=0)
+    latest_date = df['latest_date'].iloc[0]
+    latest_date_str = latest_date.strftime('%Y-%m-%d')
+
+    cached_latest_date[ticker] = latest_date_str
+    return latest_date_str

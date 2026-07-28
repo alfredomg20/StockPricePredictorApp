@@ -1,5 +1,5 @@
-import sys
 import logging
+import sys
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
@@ -8,10 +8,11 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi_throttle import RateLimiter
 
+from app.api.errors import register_exception_handlers
 from app.api.models import router as models_router
 from app.api.predict import router as predict_router
 from app.api.train import router as train_router
-from app.config import REQUIRED_ENV_VARS, FRONTEND_DIR
+from app.config import FRONTEND_DIR, REQUIRED_ENV_VARS
 from app.utils.validation_utils import validate_env_variables
 
 logger = logging.getLogger("app")
@@ -43,11 +44,13 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Stock Prediction API",
         description="API for training and predicting stock prices using linear regression.",
-        version="0.1.0",
+        version="0.1.1",
         dependencies=[Depends(router_limiter)],
+        lifespan=lifespan
     )
 
-    # Add middleware
+    register_exception_handlers(app)
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -57,7 +60,6 @@ def create_app() -> FastAPI:
     )
     app.add_middleware(GZipMiddleware, minimum_size=1000)
 
-    # Add routers
     api_prefix = "/api/v1"
     app.include_router(models_router, prefix=api_prefix)
     app.include_router(predict_router, prefix=api_prefix)

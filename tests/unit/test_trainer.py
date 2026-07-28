@@ -1,16 +1,21 @@
-import pytest
-import polars as pl
-import numpy as np
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
-from datetime import datetime, timedelta
-from app.ml.trainer import StockPriceTrainer
+
+import numpy as np
+import polars as pl
+import pytest
 from sklearn.linear_model import LinearRegression
+
+from app.config import timezone
+from app.exceptions import ModelTrainingError
+from app.ml.trainer import StockPriceTrainer
+
 
 # Mock data for stock data
 @pytest.fixture
 def mock_stock_data():
-    dates = [(datetime(2023, 1, 1) + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(100)]
+    dates = [(datetime(2023, 1, 1).astimezone(timezone) + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(100)]
     
     return pl.DataFrame({
         "date": dates,
@@ -26,15 +31,15 @@ def mock_stock_data():
 
 @pytest.fixture
 def trainer():
-    with patch('pathlib.Path.mkdir') as mock_mkdir:
+    with patch('pathlib.Path.mkdir') as _:
         return StockPriceTrainer(model_dir="test_models")
 
 class TestStockPriceTrainer:
     def test_init_creates_directory(self):
         """Test that constructor creates model directory"""
         with patch('pathlib.Path.mkdir') as mock_mkdir:
-            trainer = StockPriceTrainer(model_dir="test_models")
-            mock_mkdir.assert_called_once_with(exist_ok=True)
+            _ = StockPriceTrainer(model_dir="test_models")
+            mock_mkdir.assert_called_once_with(parents=True, exist_ok=True)
     
     def test_validate_model_inputs_valid(self, trainer, mock_stock_data):
         """Test validation with valid inputs"""
@@ -58,21 +63,21 @@ class TestStockPriceTrainer:
         with pytest.raises(ValueError):
             trainer._validate_inputs("AAPL", forecast_days, mock_stock_data)
     
-    @pytest.mark.parametrize("test_size,should_raise", [
-        (0.2, False),
-        (-0.1, True),
-        (0, True),
-        (1, True),
-        (1.1, True),
-        ("0.2", True)
+    @pytest.mark.parametrize("test_size,should_raise,expected_exception", [
+        (0.2, False, None),
+        (-0.1, True, ValueError),
+        (0, True, ValueError),
+        (1, True, ValueError),
+        (1.1, True, ValueError),
+        ("0.2", True, TypeError),
     ])
-    def test_validate_model_params_test_size(self, trainer, test_size, should_raise):
+    def test_validate_model_params_test_size(self, trainer, test_size, should_raise, expected_exception):
         """Test validation of test_size parameter"""
         X = pl.DataFrame({"feature1": [1, 2, 3]})
         y = pl.Series("target", [4, 5, 6])
         
         if should_raise:
-            with pytest.raises(ValueError):
+            with pytest.raises(expected_exception):
                 trainer._validate_model_params(test_size, X, y)
         else:
             # Should not raise exception
@@ -144,7 +149,7 @@ class TestStockPriceTrainer:
         X, y = trainer.prepare_features_target(mock_stock_data, forecast_days=5)
         
         # Create test dates that match our mock data
-        test_dates = [(datetime(2023, 1, 1) + timedelta(days=i)).strftime("%Y-%m-%d") 
+        test_dates = [(datetime(2023, 1, 1).astimezone(timezone) + timedelta(days=i)).strftime("%Y-%m-%d") 
                     for i in range(len(X))]
         
         # Configure mock model
@@ -172,7 +177,14 @@ class TestStockPriceTrainer:
         assert metrics["max_ae"] == 2.0
         assert metrics["coefficients"] == {"lag1": 0.1, "lag5": 0.2, "ma5": 0.3, "ma20": 0.4}
         assert metrics["intercept"] == 0.5
-        assert isinstance(metrics["last_train_date"], datetime)
+        assert isinstance(metrics["last_train_date"], str)
+        parsed = datetime.strptime(metrics["last_train_date"], "%Y-%m-%d").replace(tzinfo=timezone).date()
+        assert isinstance(parsed, date)
+
+        # Assert model object is returned correctly
+        assert model is mock_model
+        assert list(model.coef_) == [0.1, 0.2, 0.3, 0.4]
+        assert model.intercept_ == 0.5
         
     @patch('app.ml.trainer.StockPriceTrainer.prepare_features_target')
     @patch('app.ml.trainer.StockPriceTrainer.train_linear_model')
@@ -218,20 +230,19 @@ class TestStockPriceTrainer:
     
     @patch('app.ml.trainer.StockPriceTrainer.prepare_features_target')
     def test_training_pipeline_processing_error(self, mock_prepare, trainer, mock_stock_data):
-        """Test training pipeline with processing error"""
+        """Test training pipeline with processing error re-raises ValueError"""
         mock_prepare.side_effect = ValueError("Data processing failed")
         
-        result = trainer.training_pipeline("AAPL", mock_stock_data, 7)
-        
-        assert result["status"] == "error"
-        assert "Data processing failed" in result["error"]
-        assert result["ticker"] == "AAPL"
-        assert result["forecast_days"] == 7
+        with pytest.raises(ValueError, match="Data processing failed"):
+            trainer.training_pipeline("AAPL", mock_stock_data, 7)
     
     @patch('app.ml.trainer.StockPriceTrainer.train_linear_model')
     def test_training_pipeline_unexpected_error(self, mock_train, trainer, mock_stock_data):
-        """Test training pipeline with unexpected error"""
+        """Test training pipeline wraps unexpected errors in ModelTrainingError"""
         mock_train.side_effect = RuntimeError("Unexpected training error")
         
-        with pytest.raises(RuntimeError):
+        with pytest.raises(ModelTrainingError) as excinfo:
             trainer.training_pipeline("AAPL", mock_stock_data, 7)
+        
+        assert excinfo.value.ticker == "AAPL"
+        assert "Unexpected training error" in excinfo.value.details
