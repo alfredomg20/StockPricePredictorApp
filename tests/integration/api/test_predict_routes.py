@@ -3,16 +3,16 @@ from unittest.mock import patch
 
 import polars as pl
 import pytest
+import pytz
 from fastapi.testclient import TestClient
 
-from app.config import timezone
 from app.exceptions import ModelNotFoundError
 from app.main import app
 
 client = TestClient(app)
 
 # Mock data for predictions
-today = datetime.now(tz=timezone).date()
+today = datetime.now(tz=pytz.timezone('UTC')).date()
 MOCK_PREDICTIONS = pl.DataFrame({
     "date": [
         today + timedelta(days=1),

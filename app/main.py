@@ -9,20 +9,24 @@ from fastapi.staticfiles import StaticFiles
 from fastapi_throttle import RateLimiter
 
 from app.api.errors import register_exception_handlers
+from app.api.middleware import RequestIDMiddleware
 from app.api.models import router as models_router
 from app.api.predict import router as predict_router
 from app.api.train import router as train_router
-from app.config import FRONTEND_DIR, REQUIRED_ENV_VARS
+from app.config.logging import setup_logging
+from app.config.settings import CONFIG
+from app.schemas.config import FullConfigSchema
 from app.utils.validation_utils import validate_env_variables
 
-logger = logging.getLogger("app")
+logger = logging.getLogger('app')
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage app's lifecycle (Startup and Shutdown)."""
-    # Startup
-    missing_vars = validate_env_variables(REQUIRED_ENV_VARS)
 
+    # Startup
+    config: FullConfigSchema = app.state.config
+    missing_vars = validate_env_variables(config.env.required_env_vars)
     if missing_vars:
         logger.critical(f"Critical Fail at startup: Missing required environment variables: {', '.join(missing_vars)}")
         sys.exit(1)
@@ -35,22 +39,28 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down the application...")
 
 
-def create_app() -> FastAPI:
+def create_app(config: FullConfigSchema) -> FastAPI:
     """Create and configure the FastAPI application."""
+
+    # Init custom logger
+    setup_logging(level=config.api.logger_level, environment=config.env.environment)
 
     # Implement throttler to limit requests to 100 per minute
     router_limiter = RateLimiter(times=100, seconds=60)
 
     app = FastAPI(
-        title="Stock Prediction API",
-        description="API for training and predicting stock prices using linear regression.",
-        version="0.1.1",
+        title=config.api.title,
+        description=config.api.description,
+        version=config.api.version,
         dependencies=[Depends(router_limiter)],
         lifespan=lifespan
     )
 
+    app.state.config = config
+
     register_exception_handlers(app)
 
+    app.add_middleware(RequestIDMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -66,12 +76,12 @@ def create_app() -> FastAPI:
     app.include_router(train_router, prefix=api_prefix)
 
     # Serve frontend files in root path
-    app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
+    app.mount("/", StaticFiles(directory=config.paths.frontend_dir, html=True), name="frontend")
 
     return app
 
 # Create the FastAPI application
-app = create_app()
+app = create_app(config=CONFIG)
 
 # Run the application with Uvicorn
 if __name__ == "__main__":

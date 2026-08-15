@@ -1,15 +1,18 @@
+import logging
 import time
 import uuid
 from datetime import datetime, timedelta
 
+import pytz
 from fastapi import APIRouter, BackgroundTasks, Depends, status
 
+from app.api.deps import get_config
 from app.api.models import get_model_store
-from app.config import logger, timezone
 from app.exceptions import TaskNotFoundError, TaskNotReadyError
 from app.ml.data_loader import get_latest_date, load_ticker_data
 from app.ml.model_store import ModelStore
 from app.ml.trainer import StockPriceTrainer
+from app.schemas.config import FullConfigSchema
 from app.schemas.models import ModelMetrics
 from app.schemas.train import (
     TrainingRequest,
@@ -17,6 +20,8 @@ from app.schemas.train import (
     TrainingStatus,
     TrainingTaskResponse,
 )
+
+logger = logging.getLogger('app')
 
 # Create the router
 router = APIRouter(
@@ -28,26 +33,38 @@ router = APIRouter(
 training_tasks = {}
 
 
+def get_trainer(
+    config: FullConfigSchema = Depends(get_config)
+) -> StockPriceTrainer:
+    """Dependency to get StockPriceTrainer instance"""
+    return StockPriceTrainer(model_dir=config.paths.models_dir, tz=config.env.timezone)
+
+
 async def train_stock_model_task(
     task_id: str, 
     ticker: str, 
-    forecast_days: int
+    forecast_days: int,
+    trainer: StockPriceTrainer,
+    config: FullConfigSchema | None = None
 ):
     """Background task to train a stock price prediction model."""
+    timezone = config.env.timezone if config else None
     try:
         # Update task status
         training_tasks[task_id]["status"] = TrainingStatus.IN_PROGRESS
         start_time = time.time()
         
         # Fetch last 3 years of data
-        latest_date = get_latest_date(ticker)
+        latest_date = get_latest_date(ticker, config.gcloud)
         years = 3
         days_in_year = 365
-        start_date = (datetime.now(timezone) - timedelta(days=years * days_in_year)).strftime("%Y-%m-%d")
-        df = load_ticker_data(ticker=ticker, start_date=start_date, end_date=latest_date)
         
-        # Initialize and run the training pipeline
-        trainer = StockPriceTrainer()
+        # Handle datetime generation with fallback if timezone is not provided
+        now_dt = datetime.now(timezone) if timezone else datetime.now(pytz.timezone("UTC"))
+        start_date = (now_dt - timedelta(days=years * days_in_year)).strftime("%Y-%m-%d")
+        df = load_ticker_data(ticker=ticker, start_date=start_date, end_date=latest_date, gcloud_config=config.gcloud)
+        
+        # Run the training pipeline
         results = trainer.training_pipeline(ticker=ticker, df=df, forecast_days=forecast_days)
         
         # Calculate training duration
@@ -65,7 +82,7 @@ async def train_stock_model_task(
         logger.info(f"Training completed for task {task_id}, ticker {ticker}")
 
     except (ValueError, KeyError, FileNotFoundError, RuntimeError) as e:
-        logger.error(f"Training failed for task {task_id}: {e!s}", exc_info=True)
+        logger.exception(f"Training failed for task {task_id}")
         training_tasks[task_id].update({
             "status": TrainingStatus.FAILED,
             "result": {
@@ -81,14 +98,15 @@ async def train_stock_model_task(
 async def start_training(
     request: TrainingRequest, 
     background_tasks: BackgroundTasks,
-    model_store: ModelStore = Depends(get_model_store)
+    trainer: StockPriceTrainer = Depends(get_trainer),
+    model_store: ModelStore = Depends(get_model_store),
+    config: FullConfigSchema = Depends(get_config)
 ):
     """
     Endpoint to start a new model training task.
     Returns a task ID that can be used to check the training status.
     """
-    # Check if an up-to-date model already exists
-    trainer = StockPriceTrainer()
+    timezone = config.env.timezone
     if not trainer.needs_training(request.ticker, request.forecast_days):
         logger.info(
             f"Up-to-date model already exists for {request.ticker} "
@@ -144,12 +162,14 @@ async def start_training(
         "result": None
     }
     
-    # Start background task
+    # Start background task passing resolved dependencies
     background_tasks.add_task(
         train_stock_model_task,
-        task_id, 
-        request.ticker, 
-        request.forecast_days
+        task_id=task_id, 
+        ticker=request.ticker, 
+        forecast_days=request.forecast_days,
+        trainer=trainer,
+        config=config
     )
     
     logger.info(f"Training task {task_id} started for ticker {request.ticker}")

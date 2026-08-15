@@ -1,8 +1,8 @@
 import polars as pl
 from cachetools import TTLCache
 
-from app.config import CREDENTIALS_DICT, DATASET_ID, PROJECT_ID, STOCKS_TABLE_ID
 from app.exceptions import DataFetchError, InsufficientDataError
+from app.schemas.config import GCloudConfigSchema
 from app.utils.google_cloud_utils import get_bigquery_client
 from app.utils.validation_utils import validate_date_range, validate_ticker
 
@@ -30,13 +30,14 @@ def invalidate_latest_date_cache(ticker: str):
     if ticker in cached_latest_date:
         del cached_latest_date[ticker]
 
-def load_ticker_data(ticker: str, start_date: str, end_date: str) -> pl.DataFrame:
+def load_ticker_data(ticker: str, start_date: str, end_date: str, gcloud_config: GCloudConfigSchema) -> pl.DataFrame:
     """
     Loads stock data for train model for selected ticker and date range from BigQuery.
     Args:
         ticker (str): Stock ticker symbol.
         start_date (str): Start date in 'YYYY-MM-DD' format.
         end_date (str): End date in 'YYYY-MM-DD' format.
+        gcloud_config (GCloudConfigSchema): Configuration dictionary for Google Cloud.
     Returns:
         polars.DataFrame: DataFrame containing stock data with features for model training.
     """
@@ -62,7 +63,7 @@ def load_ticker_data(ticker: str, start_date: str, end_date: str) -> pl.DataFram
             AVG(close) OVER (ORDER BY date ROWS BETWEEN 4 PRECEDING AND CURRENT ROW) AS ma5,
             AVG(close) OVER (ORDER BY date ROWS BETWEEN 19 PRECEDING AND CURRENT ROW) AS ma20,
             AVG(close) OVER (ORDER BY date ROWS BETWEEN 99 PRECEDING AND CURRENT ROW) AS ma100
-        FROM `{PROJECT_ID}.{DATASET_ID}.{STOCKS_TABLE_ID}`
+        FROM `{gcloud_config.project_id}.{gcloud_config.dataset_id}.{gcloud_config.stocks_table_id}`
         WHERE ticker = '{ticker}'
             AND date >= '{start_date}'
             AND date <= '{end_date}'
@@ -86,7 +87,7 @@ def load_ticker_data(ticker: str, start_date: str, end_date: str) -> pl.DataFram
     """
     # Execute the query and load data into a Polars DataFrame
     try:
-        client = get_bigquery_client(CREDENTIALS_DICT, PROJECT_ID)
+        client = get_bigquery_client(gcloud_config.credentials.dict(), gcloud_config.project_id)
         query_job = client.query(query)
         df = pl.from_arrow(query_job.to_arrow())
     except Exception as e:
@@ -98,11 +99,12 @@ def load_ticker_data(ticker: str, start_date: str, end_date: str) -> pl.DataFram
     cached_ticker_data[cache_key] = df
     return df
 
-def get_latest_date(ticker: str) -> str:
+def get_latest_date(ticker: str, gcloud_config: GCloudConfigSchema) -> str:
     """
     Retrieves the latest date for a given ticker from BigQuery.
     Args:
         ticker (str): Stock ticker symbol.
+        gcloud_config (GCloudConfigSchema): Configuration dictionary for Google Cloud.
     Returns:
         str: Latest date in 'YYYY-MM-DD' format.
     """
@@ -116,12 +118,12 @@ def get_latest_date(ticker: str) -> str:
     # Construct the BigQuery SQL query
     query = f"""
         SELECT MAX(date) AS latest_date
-        FROM `{PROJECT_ID}.{DATASET_ID}.{STOCKS_TABLE_ID}`
+        FROM `{gcloud_config.project_id}.{gcloud_config.dataset_id}.{gcloud_config.stocks_table_id}`
         WHERE ticker = '{ticker}'
     """
     # Execute the query and retrieve the latest date
     try:
-        client = get_bigquery_client(CREDENTIALS_DICT, PROJECT_ID)
+        client = get_bigquery_client(gcloud_config.credentials.dict(), gcloud_config.project_id)
         query_job = client.query(query)
         result = query_job.result()
         df = result.to_dataframe()

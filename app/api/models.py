@@ -1,9 +1,12 @@
+import logging
+
 from cachetools import TTLCache
 from fastapi import APIRouter, Depends
 
-from app.config import MODELS_DIR, logger
+from app.api.deps import get_config
 from app.exceptions import ModelNotFoundError
 from app.ml.model_store import ModelStore
+from app.schemas.config import FullConfigSchema
 from app.schemas.models import (
     DeleteModelResponse,
     ForecastDaysPath,
@@ -12,6 +15,8 @@ from app.schemas.models import (
     ModelsListResponse,
     TickerPath,
 )
+
+logger = logging.getLogger('app')
 
 router = APIRouter(prefix="/models", tags=["models"])
 
@@ -25,9 +30,11 @@ def invalidate_models_cache() -> None:
     cached_models.clear()
 
 
-def get_model_store() -> ModelStore:
+def get_model_store(
+    config: FullConfigSchema = Depends(get_config)
+) -> ModelStore:
     """Dependency to get model store instance."""
-    return ModelStore(MODELS_DIR)
+    return ModelStore(model_dir=config.paths.models_dir, tz=config.env.timezone)
 
 
 @router.get("/", response_model=ModelsListResponse)

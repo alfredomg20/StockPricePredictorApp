@@ -1,15 +1,15 @@
 import uuid
 from datetime import date, datetime, timedelta
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import polars as pl
 import pytest
+import pytz
 from fastapi.exceptions import ResponseValidationError
 from fastapi.testclient import TestClient
 
 from app.api.train import train_stock_model_task, training_tasks
-from app.config import timezone
 from app.main import app
 from app.schemas.train import TrainingStatus
 
@@ -47,7 +47,7 @@ MOCK_TRAINING_RESULT = {
 @pytest.fixture
 def mock_stock_data():
 
-    dates = [(datetime.now(timezone) - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(500)]
+    dates = [(datetime.now(pytz.timezone('UTC')) - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(500)]
     prices = [100 + i * 0.1 + np.random.normal(0, 1) for i in range(500)]
     
     return pl.DataFrame({
@@ -93,8 +93,7 @@ class TestTrainingRoutes:
         mock_tasks.__contains__.return_value = True
         mock_tasks.__getitem__.return_value = {
             "status": TrainingStatus.IN_PROGRESS,
-
-            "created_at": datetime.now(timezone),
+            "created_at": datetime.now(pytz.timezone('UTC')),
             "ticker": "AAPL",
             "forecast_days": 7
         }
@@ -131,8 +130,7 @@ class TestTrainingRoutes:
         mock_tasks.__contains__.return_value = True
         mock_tasks.__getitem__.return_value = {
             "status": TrainingStatus.COMPLETED,
-
-            "created_at": datetime.now(timezone),
+            "created_at": datetime.now(pytz.timezone('UTC')),
             "ticker": "AAPL",
             "forecast_days": 7,
             "result": MOCK_TRAINING_RESULT
@@ -163,8 +161,7 @@ class TestTrainingRoutes:
         mock_tasks.__contains__.return_value = True
         mock_tasks.__getitem__.return_value = {
             "status": TrainingStatus.FAILED,
-
-            "created_at": datetime.now(timezone),
+            "created_at": datetime.now(pytz.timezone('UTC')),
             "ticker": "AAPL",
             "forecast_days": 7,
             "result": failed_result
@@ -198,8 +195,7 @@ class TestTrainingRoutes:
         mock_tasks.__contains__.return_value = True
         mock_tasks.__getitem__.return_value = {
             "status": TrainingStatus.IN_PROGRESS,
-
-            "created_at": datetime.now(timezone),
+            "created_at": datetime.now(pytz.timezone('UTC')),
             "ticker": "AAPL",
             "forecast_days": 7,
             "result": None
@@ -222,8 +218,7 @@ class TestTrainingRoutes:
         mock_tasks.__contains__.return_value = True
         mock_tasks.__getitem__.return_value = {
             "status": TrainingStatus.COMPLETED,
-
-            "created_at": datetime.now(timezone),
+            "created_at": datetime.now(pytz.timezone('UTC')),
             "ticker": "AAPL",
             "forecast_days": 7,
             "result": None
@@ -235,14 +230,17 @@ class TestTrainingRoutes:
     
     @patch("app.api.train.get_latest_date")
     @patch("app.api.train.load_ticker_data")
-    @patch("app.ml.trainer.StockPriceTrainer.training_pipeline")
-    def test_train_stock_model_task(self, mock_train_pipeline, mock_load_data, 
-                                  mock_get_latest_date, mock_stock_data):
+    def test_train_stock_model_task(self, mock_load_data, mock_get_latest_date, mock_stock_data):
         """Test the background training task function"""        
         # Setup mocks
         mock_get_latest_date.return_value = "2023-06-01"
         mock_load_data.return_value = mock_stock_data
-        mock_train_pipeline.return_value = MOCK_TRAINING_RESULT
+        
+        mock_trainer = MagicMock()
+        mock_trainer.training_pipeline.return_value = MOCK_TRAINING_RESULT
+        
+        mock_config = MagicMock()
+        mock_config.env.timezone = pytz.timezone('America/New_York')
         
         # Initialize the task in the global dict
         task_id = MOCK_TASK_ID
@@ -250,23 +248,28 @@ class TestTrainingRoutes:
             "ticker": "AAPL",
             "forecast_days": 7,
             "status": TrainingStatus.PENDING,
-
-            "created_at": datetime.now(timezone),
+            "created_at": datetime.now(pytz.timezone('UTC')),
             "result": None
         }
         
-        # Run the task (we'll run it directly rather than as a background task)
+        # Run the task passing explicit dependencies
         import asyncio
-        asyncio.run(train_stock_model_task(task_id, "AAPL", 7))
+        asyncio.run(train_stock_model_task(
+            task_id, "AAPL", 7, 
+            trainer=mock_trainer, 
+            config=mock_config
+        ))
         
         # Verify the task was updated correctly
         assert training_tasks[task_id]["status"] == TrainingStatus.COMPLETED
         assert training_tasks[task_id]["result"] == MOCK_TRAINING_RESULT
         
         # Verify the function calls
-        mock_get_latest_date.assert_called_once_with("AAPL")
+        mock_get_latest_date.assert_called_once()
         mock_load_data.assert_called_once()
-        mock_train_pipeline.assert_called_once_with(ticker="AAPL", df=mock_stock_data, forecast_days=7)
+        mock_trainer.training_pipeline.assert_called_once_with(
+            ticker="AAPL", df=mock_stock_data, forecast_days=7
+        )
     
     @patch("app.api.train.get_latest_date")
     def test_train_stock_model_task_error(self, mock_get_latest_date):
@@ -276,23 +279,30 @@ class TestTrainingRoutes:
         # Setup mock to raise a ValueError (caught by the except block in train_stock_model_task)
         mock_get_latest_date.side_effect = ValueError("API error")
         
+        mock_trainer = MagicMock()
+        mock_config = MagicMock()
+        mock_config.env.timezone = pytz.timezone("UTC")
+        
         # Initialize the task in the global dict
         task_id = MOCK_TASK_ID
         training_tasks[task_id] = {
             "ticker": "AAPL",
             "forecast_days": 7,
             "status": TrainingStatus.PENDING,
-
-            "created_at": datetime.now(timezone),
+            "created_at": datetime.now(pytz.timezone('UTC')),
             "result": None
         }
         
-        # Run the task
+        # Run the task passing explicit dependencies
         import asyncio
-        asyncio.run(train_stock_model_task(task_id, "AAPL", 7))
+        asyncio.run(train_stock_model_task(
+            task_id, "AAPL", 7, 
+            trainer=mock_trainer, 
+            config=mock_config
+        ))
         
         # Verify the task was updated to failed status
         assert training_tasks[task_id]["status"] == TrainingStatus.FAILED
         
         # Verify the function calls
-        mock_get_latest_date.assert_called_once_with("AAPL")
+        mock_get_latest_date.assert_called_once()

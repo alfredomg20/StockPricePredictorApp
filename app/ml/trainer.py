@@ -1,9 +1,11 @@
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import joblib
 import polars as pl
+import pytz
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import (
     max_error,
@@ -15,7 +17,6 @@ from sklearn.model_selection import TimeSeriesSplit
 
 from app.api.models import invalidate_models_cache
 from app.api.predict import invalidate_prediction_cache
-from app.config import MODELS_DIR, logger, timezone
 from app.exceptions import ModelTrainingError
 from app.ml.data_loader import (
     invalidate_latest_date_cache,
@@ -29,13 +30,15 @@ from app.utils.validation_utils import (
     validate_ticker,
 )
 
+logger = logging.getLogger('app')
 
 class StockPriceTrainer:
     """Handle training of stock price prediction models using linear regression."""
 
-    def __init__(self, model_dir: str | Path = MODELS_DIR):
+    def __init__(self, model_dir: str | Path, tz: pytz.BaseTzInfo):
         self.model_dir = Path(model_dir)
         self.model_dir.mkdir(parents=True, exist_ok=True)
+        self.tz = tz
 
     def _validate_inputs(self, ticker: str, forecast_days: int, df: pl.DataFrame | None = None) -> None:
         """Validate inputs for model training."""
@@ -97,11 +100,11 @@ class StockPriceTrainer:
 
         try:
             last_trained_time_str = latest_model_path.stem.split("_")[-1]
-            last_trained_time = datetime.strptime(last_trained_time_str, "%Y%m%d%H%M%S").astimezone(timezone)
+            last_trained_time = datetime.strptime(last_trained_time_str, "%Y%m%d%H%M%S").astimezone(self.tz)
         except ValueError:
             return True
 
-        now = datetime.now(timezone).replace(tzinfo=None)
+        now = datetime.now(tz=self.tz)
         today = now.date()
 
         if is_business_day(today):
@@ -109,7 +112,7 @@ class StockPriceTrainer:
             return last_trained_time < market_close_time < now
 
         last_business_day = get_last_business_day(today)
-        market_close_time = datetime(last_business_day.year, last_business_day.month, last_business_day.day, 16, 30, 0).astimezone(timezone)
+        market_close_time = datetime(last_business_day.year, last_business_day.month, last_business_day.day, 16, 30, 0).astimezone(self.tz)
         return last_trained_time < market_close_time
 
     def prepare_features_target(
@@ -137,7 +140,7 @@ class StockPriceTrainer:
         elif hasattr(last_date_val, "strftime"):
             last_train_date = datetime.combine(last_date_val, datetime.min.time())
         else:
-            last_train_date = datetime.strptime(str(last_date_val)[:10], "%Y-%m-%d").astimezone(timezone)
+            last_train_date = datetime.strptime(str(last_date_val)[:10], "%Y-%m-%d").astimezone(self.tz)
 
         feature_cols = [col for col in X.columns if col not in ["date", "target"]]
         X_features = X.select(feature_cols)
@@ -193,7 +196,7 @@ class StockPriceTrainer:
                 **metrics,
             },
         }
-        current_time_str = datetime.now(timezone).strftime("%Y%m%d%H%M%S")
+        current_time_str = datetime.now(self.tz).strftime("%Y%m%d%H%M%S")
         filename = f"{ticker}_linear_{forecast_days}day_{current_time_str}.joblib"
         final_path = self.model_dir / filename
         temp_path = self.model_dir / f"{filename}.tmp"

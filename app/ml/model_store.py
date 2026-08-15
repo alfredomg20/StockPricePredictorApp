@@ -1,10 +1,11 @@
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import joblib
+import pytz
 
-from app.config import logger, timezone
 from app.exceptions import ModelCorruptedError, ModelNotFoundError
 from app.utils.validation_utils import (
     validate_datetime,
@@ -12,13 +13,15 @@ from app.utils.validation_utils import (
     validate_ticker,
 )
 
+logger = logging.getLogger('app')
 
 class ModelStore:
     """Manage storage and retrieval of trained models."""
 
-    def __init__(self, model_dir: Path | str):
+    def __init__(self, model_dir: Path | str, tz: pytz.BaseTzInfo):
         self.model_dir = Path(model_dir)
         self.model_dir.mkdir(parents=True, exist_ok=True)
+        self.tz = tz
 
     def _validate_model_params(self, ticker: str, forecast_days: int, last_trained_time: str) -> None:
         """Validate model parameters for retrieval or deletion."""
@@ -30,7 +33,7 @@ class ModelStore:
         """Helper to generate the standardized version string and file Path."""
         self._validate_model_params(ticker, forecast_days, last_trained_time)
         
-        last_train_dt = datetime.strptime(last_trained_time, "%Y-%m-%d-%H:%M:%S").astimezone(timezone)
+        last_train_dt = datetime.strptime(last_trained_time, "%Y-%m-%d-%H:%M:%S").astimezone(self.tz)
         last_train_time_str = last_train_dt.strftime("%Y%m%d%H%M%S")
         
         version = f"{ticker}_linear_{forecast_days}day_{last_train_time_str}"

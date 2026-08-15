@@ -5,9 +5,9 @@ from unittest.mock import patch
 import numpy as np
 import polars as pl
 import pytest
+import pytz
 from sklearn.linear_model import LinearRegression
 
-from app.config import timezone
 from app.exceptions import ModelTrainingError
 from app.ml.trainer import StockPriceTrainer
 
@@ -15,7 +15,7 @@ from app.ml.trainer import StockPriceTrainer
 # Mock data for stock data
 @pytest.fixture
 def mock_stock_data():
-    dates = [(datetime(2023, 1, 1).astimezone(timezone) + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(100)]
+    dates = [(datetime(2023, 1, 1).astimezone(pytz.timezone('UTC')) + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(100)]
     
     return pl.DataFrame({
         "date": dates,
@@ -32,13 +32,13 @@ def mock_stock_data():
 @pytest.fixture
 def trainer():
     with patch('pathlib.Path.mkdir') as _:
-        return StockPriceTrainer(model_dir="test_models")
+        return StockPriceTrainer(model_dir="test_models", tz=pytz.timezone('UTC'))
 
 class TestStockPriceTrainer:
     def test_init_creates_directory(self):
         """Test that constructor creates model directory"""
         with patch('pathlib.Path.mkdir') as mock_mkdir:
-            _ = StockPriceTrainer(model_dir="test_models")
+            _ = StockPriceTrainer(model_dir="test_models", tz=pytz.timezone('UTC'))
             mock_mkdir.assert_called_once_with(parents=True, exist_ok=True)
     
     def test_validate_model_inputs_valid(self, trainer, mock_stock_data):
@@ -149,7 +149,7 @@ class TestStockPriceTrainer:
         X, y = trainer.prepare_features_target(mock_stock_data, forecast_days=5)
         
         # Create test dates that match our mock data
-        test_dates = [(datetime(2023, 1, 1).astimezone(timezone) + timedelta(days=i)).strftime("%Y-%m-%d") 
+        test_dates = [(datetime(2023, 1, 1).astimezone(pytz.timezone('UTC')) + timedelta(days=i)).strftime("%Y-%m-%d") 
                     for i in range(len(X))]
         
         # Configure mock model
@@ -178,7 +178,7 @@ class TestStockPriceTrainer:
         assert metrics["coefficients"] == {"lag1": 0.1, "lag5": 0.2, "ma5": 0.3, "ma20": 0.4}
         assert metrics["intercept"] == 0.5
         assert isinstance(metrics["last_train_date"], str)
-        parsed = datetime.strptime(metrics["last_train_date"], "%Y-%m-%d").replace(tzinfo=timezone).date()
+        parsed = datetime.strptime(metrics["last_train_date"], "%Y-%m-%d").replace(tzinfo=pytz.timezone('UTC')).date()
         assert isinstance(parsed, date)
 
         # Assert model object is returned correctly

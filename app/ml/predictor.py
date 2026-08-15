@@ -5,9 +5,9 @@ from typing import Any
 import joblib
 import polars as pl
 
-from app.config import MODELS_DIR
 from app.exceptions import ModelCorruptedError, ModelNotFoundError
 from app.ml.data_loader import get_latest_date, load_ticker_data
+from app.schemas.config import GCloudConfigSchema
 from app.utils.time_utils import get_next_business_days
 from app.utils.validation_utils import validate_forecast_days, validate_ticker
 
@@ -15,8 +15,9 @@ from app.utils.validation_utils import validate_forecast_days, validate_ticker
 class StockPricePredictor:
     """Handle stock price predictions using trained models."""
 
-    def __init__(self, model_dir: str | Path = MODELS_DIR):
+    def __init__(self, model_dir: str | Path, gcloud_config: GCloudConfigSchema):
         self.model_dir = Path(model_dir)
+        self.gcloud_config = gcloud_config
 
     def _validate_prediction_inputs(self, ticker: str, forecast_days: int) -> None:
         """Validate inputs for prediction."""
@@ -153,14 +154,13 @@ class StockPricePredictor:
         model = model_data["model"]
         metadata = model_data["metadata"]
 
-        latest_date_str = get_latest_date(ticker)
+        latest_date_str = get_latest_date(ticker, self.gcloud_config)
         latest_date = date.fromisoformat(latest_date_str)
         
         future_dates = get_next_business_days(latest_date, metadata["forecast_days"])
         start_date = latest_date - timedelta(days=180)
 
-        # Carga datos históricos (lanzará DataFetchError o InsufficientDataError si algo falla)
-        historical_data = load_ticker_data(ticker, start_date.strftime("%Y-%m-%d"), latest_date_str)
+        historical_data = load_ticker_data(ticker, start_date.strftime("%Y-%m-%d"), latest_date_str, self.gcloud_config)
         working_data = historical_data.clone()
         predictions = []
 

@@ -1,9 +1,14 @@
-from cachetools import TTLCache
-from fastapi import APIRouter
+import logging
 
-from app.config import logger
+from cachetools import TTLCache
+from fastapi import APIRouter, Depends
+
+from app.api.deps import get_config
 from app.ml.predictor import StockPricePredictor
+from app.schemas.config import FullConfigSchema
 from app.schemas.predict import PredictionRequest, PredictionResponse, PredictionResult
+
+logger = logging.getLogger('app')
 
 router = APIRouter(prefix="/predict", tags=["prediction"])
 
@@ -11,6 +16,11 @@ router = APIRouter(prefix="/predict", tags=["prediction"])
 TIME_TO_LIVE = 3600  # 1 hour lifetime
 cached_predictions = TTLCache(maxsize=100, ttl=TIME_TO_LIVE)
 
+def get_predictor(
+    config: FullConfigSchema = Depends(get_config)
+) -> StockPricePredictor:
+    """Dependency to get StockPricePredictor instance"""
+    return StockPricePredictor(model_dir=config.paths.models_dir, gcloud_config=config.gcloud)
 
 def invalidate_prediction_cache(ticker: str, forecast_days: int) -> None:
     """
@@ -26,7 +36,7 @@ def invalidate_prediction_cache(ticker: str, forecast_days: int) -> None:
 
 
 @router.post("/", response_model=PredictionResponse)
-async def predict_stock_price(request: PredictionRequest):
+async def predict_stock_price(request: PredictionRequest, predictor: StockPricePredictor = Depends(get_predictor)):
     """
     Generate stock price predictions for a specified number of future days.
 
@@ -39,7 +49,6 @@ async def predict_stock_price(request: PredictionRequest):
 
     if cache_key not in cached_predictions:
         logger.info(f"Cache miss: Generating new prediction for {request.ticker} ({request.forecast_days} days)")
-        predictor = StockPricePredictor()
         predictions_df = predictor.predict_prices(request.ticker, request.forecast_days)
         cached_predictions[cache_key] = predictions_df
     else:
