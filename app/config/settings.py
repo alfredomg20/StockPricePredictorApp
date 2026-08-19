@@ -15,7 +15,7 @@ CONFIG = FullConfigSchema(
     api={
         "title": "Stock Prediction API",
         "description": "API for training and predicting stock prices using linear regression.",
-        "version": "0.1.2",
+        "version": "0.2.0",
         "logger_level": "INFO",
     },
     env={
