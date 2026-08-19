@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi_throttle import RateLimiter
 
 from app.api.errors import register_exception_handlers
+from app.api.health import router as health_router
 from app.api.middleware import RequestIDMiddleware
 from app.api.models import router as models_router
 from app.api.predict import router as predict_router
@@ -52,7 +53,6 @@ def create_app(config: FullConfigSchema) -> FastAPI:
         title=config.api.title,
         description=config.api.description,
         version=config.api.version,
-        dependencies=[Depends(router_limiter)],
         lifespan=lifespan
     )
 
@@ -71,9 +71,10 @@ def create_app(config: FullConfigSchema) -> FastAPI:
     app.add_middleware(GZipMiddleware, minimum_size=1000)
 
     api_prefix = "/api/v1"
-    app.include_router(models_router, prefix=api_prefix)
-    app.include_router(predict_router, prefix=api_prefix)
-    app.include_router(train_router, prefix=api_prefix)
+    app.include_router(models_router, prefix=api_prefix, dependencies=[Depends(router_limiter)])
+    app.include_router(predict_router, prefix=api_prefix, dependencies=[Depends(router_limiter)])
+    app.include_router(train_router, prefix=api_prefix, dependencies=[Depends(router_limiter)])
+    app.include_router(health_router, prefix=api_prefix)
 
     # Serve frontend files in root path
     app.mount("/", StaticFiles(directory=config.paths.frontend_dir, html=True), name="frontend")
